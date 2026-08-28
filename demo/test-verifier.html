@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Test Company — Job Application</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #f4f5f7; margin: 0; padding: 40px 20px; }
+  .form-card { max-width: 480px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+  h1 { font-size: 20px; margin-bottom: 24px; }
+  label { display: block; font-size: 13px; color: #555; margin: 16px 0 6px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+  button { margin-top: 24px; width: 100%; padding: 12px; background: #3B6FE8; color: #fff; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div class="form-card">
+    <h1>Apply — Software Engineer</h1>
+    <label>Full name</label>
+    <input type="text" placeholder="Jane Doe" />
+    <label>Email</label>
+    <input type="email" placeholder="jane@example.com" />
+
+    <label style="margin-top: 24px;">Verify your degree with NexusID</label>
+    <div id="nexusid-verify"
+         data-verifier-id="test-company.com"
+         data-verifier-name="Test Company"
+         data-fields="degree_title,university"
+         data-nonce="demo-nonce-replace-per-request">
+    </div>
+
+    <button type="button">Submit Application</button>
+  </div>
+
+  <!-- Load the unpacked apps/extension/ folder in Chrome, then open this file
+       directly (file:// URL works) to see content.js detect the div above. -->
+</body>
+</html>

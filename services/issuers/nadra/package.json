@@ -1,0 +1,31 @@
+{
+  "name": "@nexusid/issuer-nadra",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Privacy-preserving digital identity verification using Selective Disclosure JWT",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*",
+    "services/issuers/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev:backend": "npm run dev --workspace=services/backend",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate": "npm run migrate --workspace=services/backend",
+    "db:seed": "npm run seed --workspace=services/backend",
+    "generate-issuer-keys": "npx ts-node scripts/generate-issuer-keys.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

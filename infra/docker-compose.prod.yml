@@ -1,0 +1,107 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────
+#  infra/docker-compose.prod.yml — production overrides
+#  Use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+# ─────────────────────────────────────────────────────────────────
+#
+#  Differences from dev:
+#  - All services use 'runtime' target (compiled, no source mounts)
+#  - No source volume mounts (no hot reload)
+#  - NODE_ENV=production everywhere
+#  - nginx exposes 80 + 443 (add cert paths)
+#  - Replaces 'command: npm run dev' with production entrypoints
+
+services:
+
+  postgres:
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+  redis:
+    restart: always
+
+  backend:
+    build:
+      target: runtime
+    restart: always
+    volumes: []   # Remove source mount
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+    command: []   # Use Dockerfile CMD
+
+  issuer-nadra:
+    build:
+      target: runtime
+    restart: always
+    volumes:
+      - ../services/issuers/nadra/.keys:/app/.keys:ro   # keys only, no source
+    environment:
+      NODE_ENV: production
+    command: []
+
+  issuer-hec:
+    build:
+      target: runtime
+    restart: always
+    volumes:
+      - ../services/issuers/hec/.keys:/app/.keys:ro
+    environment:
+      NODE_ENV: production
+    command: []
+
+  issuer-au:
+    build:
+      target: runtime
+    restart: always
+    volumes:
+      - ../services/issuers/air-university/.keys:/app/.keys:ro
+    environment:
+      NODE_ENV: production
+    command: []
+
+  issuer-linkedin:
+    build:
+      target: runtime
+    restart: always
+    volumes:
+      - ../services/issuers/linkedin/.keys:/app/.keys:ro
+    environment:
+      NODE_ENV: production
+    command: []
+
+  ml:
+    restart: always
+    volumes:
+      - ml_models:/app/models   # persist trained models
+    environment:
+      FLASK_ENV: production
+
+  web:
+    build:
+      target: runtime
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.nexusid.com/api/v1}
+        NEXT_PUBLIC_APP_NAME: NexusID
+    restart: always
+    volumes: []
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?NEXTAUTH_URL must be set}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET must be set}
+    command: []
+
+  nginx:
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      # Uncomment when SSL certificates are ready:
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+    ports:
+      - '80:80'
+      - '443:443'
+
+volumes:
+  ml_models:

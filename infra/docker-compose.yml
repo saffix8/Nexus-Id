@@ -1,0 +1,255 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────
+#  NexusID — Local Development Docker Compose
+#  Run from the repo root: docker-compose -f infra/docker-compose.yml up
+# ─────────────────────────────────────────────────────────────────
+
+networks:
+  nexusid-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+
+services:
+
+  # ── DATABASES ───────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexusid-postgres
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: nexusid_db
+      POSTGRES_USER: nexusid
+      POSTGRES_PASSWORD: nexusid_dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U nexusid -d nexusid_db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexusid-redis
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── BACKEND API ──────────────────────────────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: services/backend/Dockerfile
+      target: development
+    container_name: nexusid-backend
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '4000:4000'
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://nexusid:nexusid_dev_password@postgres:5432/nexusid_db
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
+      ML_SERVICE_URL: http://ml:5001
+      FABRIC_CHANNEL: ${FABRIC_CHANNEL:-nexusid-channel}
+      FABRIC_CHAINCODE: ${FABRIC_CHAINCODE:-credential-audit}
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ../services/backend/src:/app/services/backend/src
+      - ../services/backend/prisma:/app/services/backend/prisma 
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: npm run dev
+
+  # ── ISSUER MICROSERVICES ─────────────────────────────────────────
+
+  issuer-nadra:
+    build:
+      context: ../services/issuers/nadra
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexusid-issuer-nadra
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '4001:4001'
+    environment:
+      NODE_ENV: development
+      PORT: 4001
+      DATABASE_URL: postgresql://nexusid:nexusid_dev_password@postgres:5432/nexusid_db
+      NADRA_CLIENT_ID: ${NADRA_CLIENT_ID:-sandbox_client_id}
+      NADRA_CLIENT_SECRET: ${NADRA_CLIENT_SECRET:-sandbox_client_secret}
+      NADRA_FRANCHISE_CODE: ${NADRA_FRANCHISE_CODE:-sandbox_franchise}
+      NADRA_USE_SANDBOX: ${NADRA_USE_SANDBOX:-true}
+      NADRA_ISSUER_PRIVATE_KEY_PATH: /app/.keys/private.pem
+    volumes:
+      - ../services/issuers/nadra/src:/app/src
+      - ../services/issuers/nadra/.keys:/app/.keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run dev
+
+  issuer-hec:
+    build:
+      context: ../services/issuers/hec
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexusid-issuer-hec
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '4002:4002'
+    environment:
+      NODE_ENV: development
+      PORT: 4002
+      DATABASE_URL: postgresql://nexusid:nexusid_dev_password@postgres:5432/nexusid_db
+      HEC_API_KEY: ${HEC_API_KEY:-dev_hec_key}
+      HEC_BASE_URL: ${HEC_BASE_URL:-https://api.hec.gov.pk/degree-verification/v2}
+      HEC_ISSUER_PRIVATE_KEY_PATH: /app/.keys/private.pem
+    volumes:
+      - ../services/issuers/hec/src:/app/src
+      - ../services/issuers/hec/.keys:/app/.keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run dev
+
+  issuer-au:
+    build:
+      context: ../services/issuers/air-university
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexusid-issuer-au
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '4003:4003'
+    environment:
+      NODE_ENV: development
+      PORT: 4003
+      DATABASE_URL: postgresql://nexusid:nexusid_dev_password@postgres:5432/nexusid_db
+      AU_ISSUER_PRIVATE_KEY_PATH: /app/.keys/private.pem
+    volumes:
+      - ../services/issuers/air-university/src:/app/src
+      - ../services/issuers/air-university/.keys:/app/.keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Puppeteer needs shared memory
+    shm_size: '256mb'
+    command: npm run dev
+
+  issuer-linkedin:
+    build:
+      context: ../services/issuers/linkedin
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexusid-issuer-linkedin
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '4004:4004'
+    environment:
+      NODE_ENV: development
+      PORT: 4004
+      DATABASE_URL: postgresql://nexusid:nexusid_dev_password@postgres:5432/nexusid_db
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
+      LINKEDIN_REDIRECT_URI: ${LINKEDIN_REDIRECT_URI:-http://localhost:4004/api/v1/credentials/linkedin/callback}
+      LINKEDIN_ISSUER_PRIVATE_KEY_PATH: /app/.keys/private.pem
+    volumes:
+      - ../services/issuers/linkedin/src:/app/src
+      - ../services/issuers/linkedin/.keys:/app/.keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run dev
+
+  # ── ML FRAUD DETECTION ───────────────────────────────────────────
+
+  ml:
+    build:
+      context: ../services/ml
+      dockerfile: Dockerfile
+    container_name: nexusid-ml
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '5001:5001'
+    environment:
+      FLASK_ENV: development
+      PORT: 5001
+      DATABASE_URL: postgresql://nexusid:nexusid_dev_password@postgres:5432/nexusid_db
+    volumes:
+      - ../services/ml:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── WEB APP ──────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexusid-web
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+      NEXT_PUBLIC_APP_NAME: NexusID
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev_nextauth_secret}
+    volumes:
+      - ../apps/web/app:/app/app
+      - ../apps/web/components:/app/components
+      - ../apps/web/lib:/app/lib
+    depends_on:
+      - backend
+    command: npm run dev
+
+  # ── NGINX REVERSE PROXY ──────────────────────────────────────────
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nexusid-nginx
+    restart: unless-stopped
+    networks: [nexusid-net]
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - web

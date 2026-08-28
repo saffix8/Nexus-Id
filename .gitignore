@@ -1,0 +1,34 @@
+
+# Issuer private keys — NEVER COMMIT
+services/issuers/**/.keys/
+services/issuers/**/.issuer-private-key.pem
+node_modules
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs / temporary files
+*.log
+nexusid-error-report.txt
+
+# Accidental empty/temp files
+/0
+/npm
+/tsc
+
+# Build / generated output
+.next/
+dist/
+*.tsbuildinfo
+
+# Backup/source editor artifacts
+*.bak
+*.backup
+
+# Temporary/debug artifacts
+services/backend/NODE_OPTIONS=--experimental-vm-modules
+services/backend/tsc

@@ -1,0 +1,179 @@
+# NexusID — Hyperledger Fabric Development Network
+# Minimal single-org setup: 1 orderer, 1 peer, 1 CA, CouchDB world state
+#
+# USAGE:
+#   Start network:   docker-compose up -d
+#   Stop network:    docker-compose down
+#   Full teardown:   docker-compose down -v --remove-orphans
+#
+# Channel: nexusid-channel
+# Chaincode: credential-audit
+#
+# After starting, run scripts/fabric-setup.sh to create the channel
+# and deploy the chaincode.
+
+version: '3.8'
+
+networks:
+  nexusid-fabric:
+    name: nexusid-fabric
+    driver: bridge
+
+volumes:
+  orderer.example.com:
+  peer0.org1.example.com:
+  couchdb0:
+  ca.org1.example.com:
+
+services:
+
+  # ── Certificate Authority ──────────────────────────────────────────────────
+  ca.org1.example.com:
+    image: hyperledger/fabric-ca:1.5.7
+    container_name: ca.org1.example.com
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca-org1
+      - FABRIC_CA_SERVER_TLS_ENABLED=false          # TLS disabled for dev simplicity
+      - FABRIC_CA_SERVER_PORT=7054
+      - FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS=0.0.0.0:17054
+    ports:
+      - "7054:7054"
+      - "17054:17054"
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ca.org1.example.com:/etc/hyperledger/fabric-ca-server
+    networks:
+      - nexusid-fabric
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7054/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── CouchDB (world state database for peer0) ───────────────────────────────
+  couchdb0:
+    image: couchdb:3.3.2
+    container_name: couchdb0
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5984:5984"      # CouchDB Fauxton UI: http://localhost:5984/_utils
+    volumes:
+      - couchdb0:/opt/couchdb/data
+    networks:
+      - nexusid-fabric
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/_up"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Orderer ────────────────────────────────────────────────────────────────
+  orderer.example.com:
+    image: hyperledger/fabric-orderer:2.5.5
+    container_name: orderer.example.com
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      # Genesis block (created by configtxgen — see scripts/fabric-setup.sh)
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=file
+      - ORDERER_GENERAL_BOOTSTRAPFILE=/var/hyperledger/orderer/orderer.genesis.block
+      # TLS disabled for development
+      - ORDERER_GENERAL_TLS_ENABLED=false
+      # Operations / metrics
+      - ORDERER_OPERATIONS_LISTENADDRESS=0.0.0.0:17050
+      - ORDERER_METRICS_PROVIDER=prometheus
+    ports:
+      - "7050:7050"
+      - "17050:17050"
+    volumes:
+      - ./crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/msp:/var/hyperledger/orderer/msp
+      - ./channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+      - orderer.example.com:/var/hyperledger/production/orderer
+    networks:
+      - nexusid-fabric
+    depends_on:
+      - ca.org1.example.com
+
+  # ── Peer ──────────────────────────────────────────────────────────────────
+  peer0.org1.example.com:
+    image: hyperledger/fabric-peer:2.5.5
+    container_name: peer0.org1.example.com
+    environment:
+      # Peer identity
+      - CORE_PEER_ID=peer0.org1.example.com
+      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org1.example.com:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.example.com:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      # TLS disabled for development
+      - CORE_PEER_TLS_ENABLED=false
+      # Ledger / CouchDB
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      # Chaincode
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+      # Logging
+      - FABRIC_LOGGING_SPEC=INFO
+      # Operations / metrics
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:17051
+      - CORE_METRICS_PROVIDER=prometheus
+    ports:
+      - "7051:7051"     # gRPC (peer commands)
+      - "17051:17051"   # Operations
+    volumes:
+      # Docker socket — needed for chaincode containers (external chaincode launcher)
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      # Crypto material
+      - ./crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp:/etc/hyperledger/fabric/msp
+      # Persistent ledger storage
+      - peer0.org1.example.com:/var/hyperledger/production
+    networks:
+      - nexusid-fabric
+    depends_on:
+      couchdb0:
+        condition: service_healthy
+      orderer.example.com:
+        condition: service_started
+
+  # ── CLI — Admin tool for channel/chaincode management ─────────────────────
+  # Use this container to run peer channel create, join, and chaincode commands.
+  cli:
+    image: hyperledger/fabric-tools:2.5.5
+    container_name: nexusid-fabric-cli
+    tty: true
+    stdin_open: true
+    environment:
+      - GOPATH=/opt/gopath
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - FABRIC_LOGGING_SPEC=INFO
+      # CLI acts as Org1 admin peer
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_TLS_ENABLED=false
+      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto
+      - ./channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+      # Mount chaincode into CLI for deployment
+      - ../../blockchain/chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
+      - ./scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts
+    networks:
+      - nexusid-fabric
+    depends_on:
+      - peer0.org1.example.com

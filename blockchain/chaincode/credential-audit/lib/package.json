@@ -1,0 +1,16 @@
+{
+  "name": "credential-audit",
+  "version": "1.0.0",
+  "description": "NexusID Hyperledger Fabric chaincode for credential audit trail",
+  "main": "lib/credential-audit.js",
+  "scripts": {
+    "start": "fabric-chaincode-node start"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "fabric-contract-api": "^2.5.4",
+    "fabric-shim": "^2.5.4"
+  }
+}

@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicKey  String   @map("public_key")
+  pushToken  String?  @map("push_token")
+  deviceInfo Json?    @map("device_info")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("users")
+}
+
+model Verifier {
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domain               String                @unique
+  displayName          String                @map("display_name")
+  logoUrl              String?               @map("logo_url")
+  apiKey               String                @unique @map("api_key")
+  trusted              Boolean               @default(false)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  verificationRequests VerificationRequest[]
+
+  @@map("verifiers")
+}
+
+model VerificationRequest {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  verifierId      String?             @map("verifier_id") @db.Uuid
+  requestedFields String[]            @map("requested_fields")
+  nonce           String              @unique
+  callbackUrl     String?             @map("callback_url")
+  pageUrl         String?             @map("page_url")
+  status          String              @default("pending")
+  expiresAt       DateTime            @map("expires_at") @db.Timestamptz(6)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt     DateTime?           @map("completed_at") @db.Timestamptz(6)
+  rejectedAt      DateTime?           @map("rejected_at") @db.Timestamptz(6)
+  fraudFlags      FraudFlag[]
+  verifier        Verifier?           @relation(fields: [verifierId], references: [id])
+  result          VerificationResult?
+
+  @@index([status])
+  @@index([verifierId])
+  @@index([expiresAt])
+  @@index([nonce])
+  @@index([createdAt(sort: Desc)])
+  @@map("verification_requests")
+}
+
+model VerificationResult {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId      String              @unique @map("request_id") @db.Uuid
+  verifiedFields Json                @map("verified_fields")
+  issuer         String
+  proofHash      String              @map("proof_hash")
+  verifiedAt     DateTime            @map("verified_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  request        VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([verifiedAt(sort: Desc)])
+  @@index([issuer])
+  @@map("verification_results")
+}
+
+model IssuerRegistry {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  issuerId  String   @unique @map("issuer_id")
+  name      String
+  jwksUrl   String   @map("jwks_url")
+  publicKey String   @map("public_key")
+  active    Boolean  @default(true)
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([active])
+  @@map("issuer_registry")
+}
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  eventType  String   @map("event_type")
+  requestId  String?  @map("request_id") @db.Uuid
+  verifierId String?  @map("verifier_id") @db.Uuid
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([eventType, createdAt(sort: Desc)])
+  @@index([requestId])
+  @@index([verifierId])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model FraudFlag {
+  id        String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId String?              @map("request_id") @db.Uuid
+  riskScore Decimal?             @map("risk_score") @db.Decimal(5, 2)
+  riskLevel String?              @map("risk_level")
+  features  Json?
+  status    String               @default("pending")
+  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  request   VerificationRequest? @relation(fields: [requestId], references: [id])
+
+  @@index([status])
+  @@index([riskLevel])
+  @@index([createdAt(sort: Desc)])
+  @@map("fraud_flags")
+}
+
+model UsedNonce {
+  nonce  String   @id
+  usedAt DateTime @default(now()) @map("used_at") @db.Timestamptz(6)
+
+  @@index([usedAt])
+  @@map("used_nonces")
+}
+
+enum VerificationStatus {
+  pending
+  completed
+  rejected
+  expired
+
+  @@map("verification_status")
+}
+
+enum FraudFlagStatus {
+  pending
+  reviewed
+  dismissed
+
+  @@map("fraud_flag_status")
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+
+  @@map("risk_level")
+}

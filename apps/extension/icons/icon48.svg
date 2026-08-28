@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- Background with rounded corners matching the design system radius-md -->
+  <rect width="48" height="48" rx="10" fill="#0C0E13"/>
+
+  <!-- Subtle gradient overlay — gives slight depth like the credential cards -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#13161E"/>
+      <stop offset="100%" stop-color="#0C0E13"/>
+    </linearGradient>
+    <!-- Accent glow behind the N -->
+    <radialGradient id="glowGrad" cx="24" cy="24" r="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B6FE8" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#3B6FE8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="48" height="48" rx="10" fill="url(#bgGrad)"/>
+  <rect width="48" height="48" rx="10" fill="url(#glowGrad)"/>
+
+  <!-- Border -->
+  <rect width="48" height="48" rx="10" fill="none" stroke="#3B6FE8" stroke-width="1" stroke-opacity="0.5"/>
+
+  <!-- "N" lettermark — clean geometric at 48px -->
+  <!-- Left vertical stroke -->
+  <rect x="10" y="11" width="6" height="26" rx="1.5" fill="#3B6FE8"/>
+  <!-- Right vertical stroke -->
+  <rect x="32" y="11" width="6" height="26" rx="1.5" fill="#3B6FE8"/>
+  <!-- Diagonal: top-left to bottom-right -->
+  <line x1="14" y1="12" x2="34" y2="36" stroke="#3B6FE8" stroke-width="5.5" stroke-linecap="round"/>
+
+  <!-- Small shield dot at bottom-right — "verified" signal -->
+  <circle cx="38" cy="38" r="5" fill="#0C0E13"/>
+  <circle cx="38" cy="38" r="4" fill="#22C55E"/>
+  <!-- Checkmark in the dot -->
+  <polyline points="35.5,38 37.2,39.8 40.5,36.5" fill="none" stroke="#0C0E13" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

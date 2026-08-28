@@ -1,0 +1,30 @@
+{
+  "name": "@nexusid/sd-jwt",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Privacy-preserving digital identity verification using Selective Disclosure JWT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./issuer": {
+      "types": "./dist/issuer.d.ts",
+      "import": "./dist/issuer.js"
+    },
+    "./holder": {
+      "types": "./dist/holder.d.ts",
+      "import": "./dist/holder.js"
+    },
+    "./verifier": {
+      "types": "./dist/verifier.d.ts",
+      "import": "./dist/verifier.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  }
+}

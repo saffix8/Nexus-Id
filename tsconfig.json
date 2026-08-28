@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/sd-jwt"
+    },
+    {
+      "path": "./services/backend"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "name": "nexusid",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Privacy-preserving digital identity verification using Selective Disclosure JWT",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*",
+    "services/issuers/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev:backend": "npm run dev --workspace=services/backend",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate": "npm run migrate --workspace=services/backend",
+    "db:seed": "npm run seed --workspace=services/backend",
+    "generate-issuer-keys": "npx ts-node scripts/generate-issuer-keys.ts"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.2.0",
+    "@types/supertest": "^7.2.1",
+    "concurrently": "^8.2.2",
+    "dotenv": "^17.4.2",
+    "jest": "^29.7.0",
+    "prisma": "^6.19.3",
+    "ts-jest": "^29.4.12",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "fabric-network": "^2.2.20",
+    "jose": "^6.2.9",
+    "uuid": "^14.0.1"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "removeComments": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nexusid/types": ["packages/types/index.ts"],
+      "@nexusid/sd-jwt": ["packages/sd-jwt/src/index.ts"],
+      "@nexusid/sd-jwt/issuer": ["packages/sd-jwt/src/issuer.ts"],
+      "@nexusid/sd-jwt/holder": ["packages/sd-jwt/src/holder.ts"],
+      "@nexusid/sd-jwt/verifier": ["packages/sd-jwt/src/verifier.ts"]
+    }
+  },
+"include": [
+  "apps/**/*.ts",
+  "apps/**/*.tsx",
+  "packages/**/*.ts",
+  "packages/**/*.tsx",
+  "services/**/*.ts",
+  "services/**/*.tsx",
+  "scripts/**/*.ts"
+],
+
+  "exclude": ["node_modules", "dist", "build", "coverage"]
+}

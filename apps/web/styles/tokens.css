@@ -1,0 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ── SURFACE COLORS ─────────────────────────────── */
+  --color-bg-base:        #0C0E13;
+  --color-bg-elevated:    #13161E;
+  --color-bg-inset:       #0A0C10;
+  --color-bg-overlay:     #1A1E28;
+
+  /* ── BORDER COLORS ──────────────────────────────── */
+  --color-border-subtle:  #1E2330;
+  --color-border-default: #252C3D;
+  --color-border-strong:  #3A4560;
+
+  /* ── TEXT COLORS ────────────────────────────────── */
+  --color-text-primary:   #EEF0F6;
+  --color-text-secondary: #8B92A8;
+  --color-text-tertiary:  #525A72;
+  --color-text-inverse:   #0C0E13;
+
+  /* ── ACCENT — SIGNATURE COLOR ───────────────────── */
+  --color-accent-primary:   #3B6FE8;
+  --color-accent-secondary: #5B4FE8;
+  --color-accent-glow:      #3B6FE820;
+  --color-accent-gradient:  linear-gradient(135deg, #3B6FE8 0%, #5B4FE8 100%);
+
+  /* ── SEMANTIC COLORS ────────────────────────────── */
+  --color-success:        #22C55E;
+  --color-success-bg:     #0F2A1A;
+  --color-success-border: #16532F;
+
+  --color-warning:        #F59E0B;
+  --color-warning-bg:     #261D07;
+  --color-warning-border: #4D3A0E;
+
+  --color-danger:         #EF4444;
+  --color-danger-bg:      #250F0F;
+  --color-danger-border:  #4A1515;
+
+  --color-info:           #38BDF8;
+  --color-info-bg:        #071B29;
+
+  /* ── CREDENTIAL TYPE COLORS ─────────────────────── */
+  --color-cred-identity:    #3B82F6;
+  --color-cred-identity-bg: #0D1B35;
+  --color-cred-education:   #8B5CF6;
+  --color-cred-education-bg:#1A0D35;
+  --color-cred-employment:  #0EA5E9;
+  --color-cred-employment-bg:#071B26;
+  --color-cred-enrollment:  #10B981;
+  --color-cred-enrollment-bg:#071E15;
+
+  /* ── ELEVATION / SHADOW ─────────────────────────── */
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:   0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:   0 8px 32px rgba(0,0,0,0.6);
+  --shadow-accent: 0 0 0 1px rgba(59,111,232,0.4), 0 0 24px rgba(59,111,232,0.1);
+
+  /* ── TYPE SCALE ──────────────────────────────────── */
+  --font-display:  'DM Sans', sans-serif;
+  --font-body:     'Inter', sans-serif;
+  --font-mono:     'JetBrains Mono', monospace;
+
+  --text-xs:   0.64rem;
+  --text-sm:   0.8rem;
+  --text-base: 1rem;
+  --text-lg:   1.25rem;
+  --text-xl:   1.563rem;
+  --text-2xl:  1.953rem;
+  --text-3xl:  2.441rem;
+  --text-4xl:  3.052rem;
+
+  --tracking-tight:  -0.02em;
+  --tracking-normal: 0em;
+  --tracking-wide:   0.06em;
+  --tracking-wider:  0.12em;
+
+  --leading-none:   1;
+  --leading-tight:  1.25;
+  --leading-snug:   1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed:1.625;
+
+  /* ── SPACING SCALE (4px base) ───────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* ── BORDER RADIUS ───────────────────────────────── */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-full: 9999px;
+}

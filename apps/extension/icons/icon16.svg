@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Background -->
+  <rect width="16" height="16" rx="3" fill="#0C0E13"/>
+
+  <!-- Accent border ring (subtle) -->
+  <rect width="16" height="16" rx="3" fill="none" stroke="#3B6FE8" stroke-width="0.75" stroke-opacity="0.6"/>
+
+  <!-- "N" lettermark — bold geometric, matches DM Sans weight -->
+  <!-- Left vertical stroke -->
+  <rect x="3" y="3.5" width="2" height="9" rx="0.5" fill="#3B6FE8"/>
+  <!-- Right vertical stroke -->
+  <rect x="11" y="3.5" width="2" height="9" rx="0.5" fill="#3B6FE8"/>
+  <!-- Diagonal stroke: top-left to bottom-right -->
+  <!-- Rendered as a rotated rectangle for crispness at small size -->
+  <line x1="4" y1="4" x2="12" y2="12" stroke="#3B6FE8" stroke-width="2" stroke-linecap="round"/>
+</svg>

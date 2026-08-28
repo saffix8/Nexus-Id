@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg128" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#13161E"/>
+      <stop offset="100%" stop-color="#0C0E13"/>
+    </linearGradient>
+    <!-- Accent glow -->
+    <radialGradient id="glow128" cx="64" cy="64" r="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B6FE8" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#3B6FE8" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Accent gradient for the N strokes — matches button gradient -->
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B6FE8"/>
+      <stop offset="100%" stop-color="#5B4FE8"/>
+    </linearGradient>
+    <!-- Diagonal security pattern (same as CredentialCard) -->
+    <pattern id="secPattern" x="0" y="0" width="12" height="12" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="12" x2="12" y2="0" stroke="#3B6FE8" stroke-width="0.5" stroke-opacity="0.08"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="128" height="128" rx="24" fill="url(#bg128)"/>
+
+  <!-- Security pattern overlay -->
+  <rect width="128" height="128" rx="24" fill="url(#secPattern)"/>
+
+  <!-- Glow -->
+  <rect width="128" height="128" rx="24" fill="url(#glow128)"/>
+
+  <!-- Border — 1px accent stroke -->
+  <rect width="128" height="128" rx="24" fill="none" stroke="#3B6FE8" stroke-width="1.5" stroke-opacity="0.4"/>
+
+  <!-- Inner subtle highlight at top -->
+  <path d="M24 1H104C116.15 1 127 11.85 127 24V30C127 30 100 34 64 34C28 34 1 30 1 30V24C1 11.85 11.85 1 24 1Z"
+    fill="white" fill-opacity="0.025"/>
+
+  <!-- "N" lettermark — full detail at 128px -->
+  <!-- Left vertical stroke -->
+  <rect x="26" y="28" width="17" height="72" rx="4" fill="url(#accentGrad)"/>
+  <!-- Right vertical stroke -->
+  <rect x="85" y="28" width="17" height="72" rx="4" fill="url(#accentGrad)"/>
+  <!-- Diagonal stroke — thick, fills the space -->
+  <line x1="33" y1="30" x2="95" y2="98"
+    stroke="url(#accentGrad)"
+    stroke-width="16"
+    stroke-linecap="round"/>
+
+  <!-- Verification badge — bottom right quadrant -->
+  <!-- Badge circle background (dark, to punch out from bg) -->
+  <circle cx="98" cy="98" r="18" fill="#0C0E13"/>
+  <!-- Badge fill -->
+  <circle cx="98" cy="98" r="16" fill="#0F2A1A"/>
+  <!-- Badge border -->
+  <circle cx="98" cy="98" r="16" fill="none" stroke="#22C55E" stroke-width="1.5" stroke-opacity="0.6"/>
+  <!-- Shield icon in badge -->
+  <path d="M98 86 C98 86 90 89 90 95 L90 99 C90 104 94 108 98 110 C102 108 106 104 106 99 L106 95 C106 89 98 86 98 86Z"
+    fill="#22C55E" fill-opacity="0.15" stroke="#22C55E" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- Checkmark in shield -->
+  <polyline points="94,98 97,101 103,95"
+    fill="none" stroke="#22C55E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

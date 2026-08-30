@@ -10,10 +10,10 @@
     "services/issuers/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
-    "dev:backend": "npm run dev --workspace=services/backend",
-    "dev:web": "npm run dev --workspace=apps/web",
-    "test": "npm run test --workspaces --if-present",
+    "dev": "react-native start",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "test": "jest",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:migrate": "npm run migrate --workspace=services/backend",

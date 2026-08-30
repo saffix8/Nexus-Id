@@ -1,15 +1,15 @@
 // services/backend/src/routes/auth.route.ts
 //
-// Canonical /api/v1/auth/* router. Delegates to the same controller
-// functions used by /api/v1/users/* — see controllers/auth.controller.ts.
-// No authentication logic lives in this file.
+// Canonical /api/v1/auth/* router — serves the WEB app's email/password
+// login (web-auth.controller.ts). This is intentionally NOT the same
+// as mobile's RSA-challenge flow in users.route.ts/auth.controller.ts —
+// two different clients, two different trust models, kept separate on purpose.
 
 import { Router } from 'express';
-import { register, login } from '../controllers/auth.controller.js';
-
+import { webRegister, webLogin } from '../controllers/web-auth.controller.js';
 const router = Router();
 
-router.post('/register', register);
-router.post('/login', login);
+router.post('/register', webRegister);
+router.post('/login', webLogin);
 
 export default router;

@@ -83,6 +83,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action');
 
+  if (action === 'logout') {
+    return handleLogout();
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -98,8 +102,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case 'register':
         return await handleRegister(body);
 
-      case 'logout':
-        return handleLogout();
 
       default:
         return errorResponse(`Unknown action: ${action ?? '(none)'}`, 400);

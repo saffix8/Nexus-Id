@@ -214,7 +214,7 @@ export class VerificationService {
       },
     });
 
-        // 3. Collect all users with a registered push token.
+    // 3. Collect all users with a registered push token.
     const users = await prisma.user.findMany({
       where: {
         pushToken: {
@@ -230,7 +230,7 @@ export class VerificationService {
       .map((user) => user.pushToken)
       .filter((token): token is string => Boolean(token));
 
-      // 4. Dispatch FCM notifications.
+    // 4. Dispatch FCM notifications.
     // A notification failure must never fail verification-request creation.
     let notification_sent = false;
 
@@ -439,6 +439,14 @@ export class VerificationService {
         'User not found',
         'USER_NOT_FOUND',
         404,
+      );
+    }
+
+    if (!userRecord.publicKey) {
+      throw new VerificationError(
+        'User has no registered public key — cannot verify proof',
+        'MISSING_PUBLIC_KEY',
+        400,
       );
     }
 

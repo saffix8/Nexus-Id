@@ -25,3 +25,5 @@ module.exports = {
 
   setupFiles: ['<rootDir>/../../jest.setup.cjs'],
 };
+// jest.config.js (or wherever testPathIgnorePatterns lives)
+testPathIgnorePatterns: ['/node_modules/', '/__tests__/helpers.ts']

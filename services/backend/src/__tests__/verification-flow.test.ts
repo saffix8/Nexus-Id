@@ -151,8 +151,8 @@ describe('Test 1 — User registration', () => {
       .post('/api/v1/users/register')
       .send({
         user_id:     testUserId,
-        publicKey:  userKeys.publicKey,
-        pushToken:  'test-fcm-token-abc123',
+        public_key:  userKeys.publicKey,
+        push_token:  'test-fcm-token-abc123',
         device_info: { os: 'android', version: '14', model: 'Pixel 8' },
       })
       .expect('Content-Type', /json/)
@@ -173,8 +173,8 @@ describe('Test 1 — User registration', () => {
       .post('/api/v1/users/register')
       .send({
         user_id:     testUserId,
-        publicKey:  userKeys.publicKey,
-        pushToken:  'test-fcm-token-abc123',
+        public_key:  userKeys.publicKey,
+        push_token:  'test-fcm-token-abc123',
         device_info: { os: 'android', version: '14', model: 'Pixel 8' },
       })
       .expect(201);

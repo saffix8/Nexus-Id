@@ -44,7 +44,7 @@ class NotificationService {
    * Call once at app startup (src/index.ts).
    */
   initialize(): void {
-    if (this.initialized || admin.apps.length > 0) {
+    if (this.initialized || (admin.apps?.length ?? 0) > 0) {
       this.initialized = true;
       return;
     }

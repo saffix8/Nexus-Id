@@ -2,26 +2,32 @@
   "name": "@nexusid/issuer-hec",
   "version": "1.0.0",
   "private": true,
-  "description": "Privacy-preserving digital identity verification using Selective Disclosure JWT",
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "services/*",
-    "services/issuers/*"
-  ],
+  "description": "HEC degree verification issuer microservice for NexusID",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
-    "dev:backend": "npm run dev --workspace=services/backend",
-    "dev:web": "npm run dev --workspace=apps/web",
-    "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "db:migrate": "npm run migrate --workspace=services/backend",
-    "db:seed": "npm run seed --workspace=services/backend",
-    "generate-issuer-keys": "npx ts-node scripts/generate-issuer-keys.ts"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nexusid/sd-jwt": "^1.0.0",
+    "@nexusid/types": "^1.0.0",
+    "axios": "^1.19.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "jose": "^6.2.9",
+    "morgan": "^1.11.0",
+    "uuid": "^14.0.1",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.3.3"
   },
   "engines": {

@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --color-bg-base:        #0C0E13;
+  --color-bg-elevated:    #13161E;
+  --color-bg-inset:       #0A0C10;
+  --color-bg-overlay:     #1A1E28;
+
+  --color-border-subtle:  #1E2330;
+  --color-border-default: #252C3D;
+  --color-border-strong:  #3A4560;
+
+  --color-text-primary:   #EEF0F6;
+  --color-text-secondary: #8B92A8;
+  --color-text-tertiary:  #525A72;
+
+  --color-accent-primary:   #3B6FE8;
+  --color-accent-secondary: #5B4FE8;
+}
+
+* {
+  border-color: var(--color-border-subtle);
+}
+
+html,
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: 'Inter', sans-serif;
+}

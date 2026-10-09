@@ -30,5 +30,4 @@ dist/
 *.backup
 
 # Temporary/debug artifacts
-services/backend/NODE_OPTIONS=--experimental-vm-modules
-services/backend/tsc
+/Docs and Context Files/test.txt

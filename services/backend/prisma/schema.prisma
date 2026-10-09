@@ -17,6 +17,7 @@ model User {
   name         String?
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  verifiers  Verifier[]
 
   @@map("users")
 }
@@ -28,9 +29,12 @@ model Verifier {
   logoUrl              String?               @map("logo_url")
   apiKey               String                @unique @map("api_key")
   trusted              Boolean               @default(false)
+  ownerUserId          String?               @map("owner_user_id") @db.Uuid
   createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  owner                User?                 @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   verificationRequests VerificationRequest[]
 
+  @@index([ownerUserId])
   @@map("verifiers")
 }
 

@@ -32,8 +32,11 @@ CREATE TABLE verifiers (
   logo_url     TEXT,                             -- Optional logo URL
   api_key      TEXT        UNIQUE NOT NULL,      -- For verifier API authentication
   trusted      BOOLEAN     NOT NULL DEFAULT FALSE, -- Admin-approved trust badge
+  owner_user_id UUID        REFERENCES users(id) ON DELETE SET NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_verifiers_owner_user_id ON verifiers(owner_user_id);
 
 -- =============================================================================
 -- VERIFICATION REQUESTS

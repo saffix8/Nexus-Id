@@ -84,10 +84,12 @@ async function seedVerifiers(): Promise<void> {
       displayName: 'Demo Job Portal',
       logoUrl: null,
       apiKey: 'demo_api_key_12345',
+      ownerUserId: '00000000-0000-0000-0000-000000000001',
       trusted: true,
     },
     update: {
       displayName: 'Demo Job Portal',
+      ownerUserId: '00000000-0000-0000-0000-000000000001',
       trusted: true,
     },
   });
@@ -142,8 +144,8 @@ async function main(): Promise<void> {
 
   try {
     await seedIssuerRegistry();
-    await seedVerifiers();
     await seedDemoUser();
+    await seedVerifiers();
 
     console.log('\n✅ Seeding complete.\n');
     console.log('Next step: run `npx ts-node scripts/generate-issuer-keys.ts`');

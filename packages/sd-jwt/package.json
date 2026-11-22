@@ -9,19 +9,23 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./issuer": {
       "types": "./dist/issuer.d.ts",
-      "import": "./dist/issuer.js"
+      "import": "./dist/issuer.js",
+      "default": "./dist/issuer.js"
     },
     "./holder": {
       "types": "./dist/holder.d.ts",
-      "import": "./dist/holder.js"
+      "import": "./dist/holder.js",
+      "default": "./dist/holder.js"
     },
     "./verifier": {
       "types": "./dist/verifier.d.ts",
-      "import": "./dist/verifier.js"
+      "import": "./dist/verifier.js",
+      "default": "./dist/verifier.js"
     }
   },
   "scripts": {

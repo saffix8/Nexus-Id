@@ -4,6 +4,7 @@
   "private": true,
   "description": "HEC degree verification issuer microservice for NexusID",
   "main": "dist/index.js",
+  "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",

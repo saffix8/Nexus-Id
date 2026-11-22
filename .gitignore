@@ -32,3 +32,16 @@ dist/
 # Temporary/debug artifacts
 services/backend/NODE_OPTIONS=--experimental-vm-modules
 services/backend/tsc
+
+# Claude Code
+.claude/settings.local.json
+
+# Secrets (should already be here — double-checking)
+.env*
+**/.env*
+**/*.pem
+**/*.jwk
+**/*.keystore
+**/keys/*.pem
+services/ml/venv/
+apps/mobile/android/app/*.keystore

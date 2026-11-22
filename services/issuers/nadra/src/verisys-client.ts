@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance } from "axios";
 
 export interface NadraPersonData {
   cnic: string;
@@ -32,22 +32,23 @@ interface CachedToken {
 export class NadraVerificationError extends Error {
   constructor(
     public readonly code: string,
-    message: string
+    message: string,
   ) {
     super(message);
-    this.name = 'NadraVerificationError';
+    this.name = "NadraVerificationError";
   }
 }
 
 export class NadraAuthError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'NadraAuthError';
+    this.name = "NadraAuthError";
   }
 }
 
 export class NadraVerisysClient {
   private readonly baseURL: string;
+  private readonly useSandbox: boolean;
   private readonly clientId: string;
   private readonly clientSecret: string;
   private readonly franchiseCode: string;
@@ -55,18 +56,18 @@ export class NadraVerisysClient {
   private cachedToken: CachedToken | null = null;
 
   constructor() {
-    const useSandbox = process.env.NADRA_USE_SANDBOX === 'true';
-    this.baseURL = useSandbox
-      ? 'https://sandbox.verisys.nadra.gov.pk/api/v1'
-      : 'https://verisys.nadra.gov.pk/api/v1';
+    this.useSandbox = process.env.NADRA_USE_SANDBOX === "true";
+    this.baseURL = this.useSandbox
+      ? "https://sandbox.verisys.nadra.gov.pk/api/v1"
+      : "https://verisys.nadra.gov.pk/api/v1";
 
-    this.clientId = process.env.NADRA_CLIENT_ID ?? '';
-    this.clientSecret = process.env.NADRA_CLIENT_SECRET ?? '';
-    this.franchiseCode = process.env.NADRA_FRANCHISE_CODE ?? '';
+    this.clientId = process.env.NADRA_CLIENT_ID ?? "";
+    this.clientSecret = process.env.NADRA_CLIENT_SECRET ?? "";
+    this.franchiseCode = process.env.NADRA_FRANCHISE_CODE ?? "";
 
     if (!this.clientId || !this.clientSecret || !this.franchiseCode) {
       throw new Error(
-        'Missing required NADRA env vars: NADRA_CLIENT_ID, NADRA_CLIENT_SECRET, NADRA_FRANCHISE_CODE'
+        "Missing required NADRA env vars: NADRA_CLIENT_ID, NADRA_CLIENT_SECRET, NADRA_FRANCHISE_CODE",
       );
     }
 
@@ -82,15 +83,15 @@ export class NadraVerisysClient {
 
     try {
       const params = new URLSearchParams({
-        grant_type: 'client_credentials',
+        grant_type: "client_credentials",
         client_id: this.clientId,
         client_secret: this.clientSecret,
       });
 
       const response = await this.http.post<TokenResponse>(
-        '/oauth/token',
+        "/oauth/token",
         params.toString(),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
       );
 
       const { access_token, expires_in } = response.data;
@@ -103,18 +104,25 @@ export class NadraVerisysClient {
       return access_token;
     } catch (err) {
       const message = axios.isAxiosError(err)
-        ? err.response?.data?.message ?? err.message
-        : 'Unknown error during NADRA authentication';
+        ? (err.response?.data?.message ?? err.message)
+        : "Unknown error during NADRA authentication";
       throw new NadraAuthError(`NADRA auth failed: ${message}`);
     }
   }
 
   async verifyCNIC(cnic: string, phone: string): Promise<NadraPersonData> {
+    // Per SRS: real NADRA Verisys integration is out of scope — NADRA is
+    // "simulated by team-operated services" for this FYP. Sandbox mode
+    // returns synthetic person data instead of calling the real NADRA API.
+    if (this.useSandbox) {
+      return this.simulateVerification(cnic);
+    }
+
     const token = await this.getAuthToken();
 
     try {
       const response = await this.http.post<NadraVerificationResponse>(
-        '/verify-cnic',
+        "/verify-cnic",
         {
           cnic,
           contact_number: phone,
@@ -123,15 +131,18 @@ export class NadraVerisysClient {
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       const { code, message, data } = response.data;
 
-      if (code !== '00') {
-        throw new NadraVerificationError(code, `NADRA verification failed: ${message}`);
+      if (code !== "00") {
+        throw new NadraVerificationError(
+          code,
+          `NADRA verification failed: ${message}`,
+        );
       }
 
       return data;
@@ -139,11 +150,34 @@ export class NadraVerisysClient {
       if (err instanceof NadraVerificationError) throw err;
 
       const message = axios.isAxiosError(err)
-        ? err.response?.data?.message ?? err.message
-        : 'Unknown error during CNIC verification';
+        ? (err.response?.data?.message ?? err.message)
+        : "Unknown error during CNIC verification";
 
-      throw new NadraVerificationError('UNKNOWN', `CNIC verification error: ${message}`);
+      throw new NadraVerificationError(
+        "UNKNOWN",
+        `CNIC verification error: ${message}`,
+      );
     }
+  }
+
+  private simulateVerification(cnic: string): NadraPersonData {
+    const today = new Date();
+    const issueDate = new Date(today);
+    issueDate.setFullYear(issueDate.getFullYear() - 5);
+    const expiryDate = new Date(today);
+    expiryDate.setFullYear(expiryDate.getFullYear() + 5);
+
+    return {
+      cnic,
+      full_name: "Simulated Test User",
+      father_name: "Simulated Father Name",
+      date_of_birth: "2000-01-15",
+      gender: "M",
+      address: "Sector G-10, Islamabad, Pakistan",
+      issue_date: issueDate.toISOString().slice(0, 10),
+      expiry_date: expiryDate.toISOString().slice(0, 10),
+      verified: true,
+    };
   }
 }
 

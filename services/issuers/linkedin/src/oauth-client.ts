@@ -1,5 +1,5 @@
-import axios from 'axios';
-import { randomUUID } from 'crypto';
+import axios from "axios";
+import { randomUUID } from "crypto";
 
 export interface LinkedInProfile {
   id: string;
@@ -34,7 +34,7 @@ interface LinkedInMeResponse {
 
 interface LinkedInEmailResponse {
   elements: Array<{
-    'handle~': {
+    "handle~": {
       emailAddress: string;
     };
   }>;
@@ -61,19 +61,32 @@ export class LinkedInOAuthClient {
   private readonly clientId: string;
   private readonly clientSecret: string;
   private readonly redirectURI: string;
+  private readonly useSandbox: boolean;
   private readonly stateMap = new Map<string, StateEntry>();
 
   constructor() {
     const clientId = process.env.LINKEDIN_CLIENT_ID;
     const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
-    const redirectURI = process.env.LINKEDIN_REDIRECT_URI ?? 'http://localhost:4004/api/v1/credentials/linkedin/callback';
+    const redirectURI =
+      process.env.LINKEDIN_REDIRECT_URI ??
+      "http://localhost:4004/api/v1/credentials/linkedin/callback";
 
-    if (!clientId) throw new Error('LINKEDIN_CLIENT_ID environment variable is required');
-    if (!clientSecret) throw new Error('LINKEDIN_CLIENT_SECRET environment variable is required');
+    if (!clientId)
+      throw new Error("LINKEDIN_CLIENT_ID environment variable is required");
+    if (!clientSecret)
+      throw new Error(
+        "LINKEDIN_CLIENT_SECRET environment variable is required",
+      );
 
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.redirectURI = redirectURI;
+    // Per SRS: real LinkedIn integration is out of scope — LinkedIn is
+    // "simulated by team-operated services" for this FYP. A real OAuth
+    // authorization code can only come from LinkedIn's live consent screen,
+    // which this team's sandbox client id cannot complete. Default to
+    // simulated token exchange and profile/positions data.
+    this.useSandbox = process.env.LINKEDIN_USE_SANDBOX !== "false";
   }
 
   getAuthorizationURL(): string {
@@ -83,10 +96,10 @@ export class LinkedInOAuthClient {
     this.stateMap.set(state, { timestamp: Date.now() });
 
     const params = new URLSearchParams({
-      response_type: 'code',
+      response_type: "code",
       client_id: this.clientId,
       redirect_uri: this.redirectURI,
-      scope: 'r_liteprofile r_emailaddress',
+      scope: "r_liteprofile r_emailaddress",
       state,
     });
 
@@ -98,12 +111,20 @@ export class LinkedInOAuthClient {
 
     const entry = this.stateMap.get(state);
     if (!entry) {
-      throw new LinkedInOAuthError('INVALID_STATE', 'Invalid or expired OAuth state parameter — possible CSRF attack');
+      throw new LinkedInOAuthError(
+        "INVALID_STATE",
+        "Invalid or expired OAuth state parameter — possible CSRF attack",
+      );
     }
     this.stateMap.delete(state);
 
+    if (this.useSandbox) {
+      void code;
+      return "sandbox-simulated-access-token";
+    }
+
     const params = new URLSearchParams({
-      grant_type: 'authorization_code',
+      grant_type: "authorization_code",
       code,
       redirect_uri: this.redirectURI,
       client_id: this.clientId,
@@ -111,29 +132,39 @@ export class LinkedInOAuthClient {
     });
 
     const response = await axios.post<LinkedInTokenResponse>(
-      'https://www.linkedin.com/oauth/v2/accessToken',
+      "https://www.linkedin.com/oauth/v2/accessToken",
       params.toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
     );
 
     return response.data.access_token;
   }
 
   async getProfile(accessToken: string): Promise<LinkedInProfile> {
+    if (this.useSandbox) {
+      void accessToken;
+      return {
+        id: "sandbox-linkedin-id",
+        firstName: "Simulated",
+        lastName: "Test User",
+        email: "simulated.test.user@example.com",
+      };
+    }
+
     const headers = { Authorization: `Bearer ${accessToken}` };
 
     const [meRes, emailRes] = await Promise.all([
       axios.get<LinkedInMeResponse>(
-        'https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName)',
-        { headers }
+        "https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName)",
+        { headers },
       ),
       axios.get<LinkedInEmailResponse>(
-        'https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))',
-        { headers }
+        "https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))",
+        { headers },
       ),
     ]);
 
-    const email = emailRes.data.elements?.[0]?.['handle~']?.emailAddress ?? '';
+    const email = emailRes.data.elements?.[0]?.["handle~"]?.emailAddress ?? "";
 
     return {
       id: meRes.data.id,
@@ -144,14 +175,27 @@ export class LinkedInOAuthClient {
   }
 
   async getPositions(accessToken: string): Promise<LinkedInPosition[]> {
+    if (this.useSandbox) {
+      void accessToken;
+      return [
+        {
+          company: "Simulated Tech Co",
+          title: "Software Engineer",
+          start_year: 2022,
+          end_year: null,
+          is_current: true,
+        },
+      ];
+    }
+
     const response = await axios.get<LinkedInPositionsResponse>(
-      'https://api.linkedin.com/v2/positions?q=members',
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      "https://api.linkedin.com/v2/positions?q=members",
+      { headers: { Authorization: `Bearer ${accessToken}` } },
     );
 
     return (response.data.elements ?? []).map((el) => ({
-      company: el.company?.name ?? 'Unknown Company',
-      title: el.title?.name ?? 'Unknown Title',
+      company: el.company?.name ?? "Unknown Company",
+      title: el.title?.name ?? "Unknown Title",
       start_year: el.timePeriod?.startDate?.year ?? new Date().getFullYear(),
       end_year: el.timePeriod?.endDate?.year ?? null,
       is_current: !el.timePeriod?.endDate,
@@ -170,11 +214,15 @@ export class LinkedInOAuthClient {
 
 export class LinkedInOAuthError extends Error {
   constructor(
-    public readonly code: 'INVALID_STATE' | 'TOKEN_EXCHANGE_FAILED' | 'PROFILE_FETCH_FAILED' | 'POSITIONS_FETCH_FAILED',
-    message: string
+    public readonly code:
+      | "INVALID_STATE"
+      | "TOKEN_EXCHANGE_FAILED"
+      | "PROFILE_FETCH_FAILED"
+      | "POSITIONS_FETCH_FAILED",
+    message: string,
   ) {
     super(message);
-    this.name = 'LinkedInOAuthError';
+    this.name = "LinkedInOAuthError";
   }
 }
 

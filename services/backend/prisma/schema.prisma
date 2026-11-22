@@ -17,8 +17,38 @@ model User {
   name         String?
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  credentials Credential[]
 
   @@map("users")
+}
+
+model Credential {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  issuerCredentialId String   @unique @map("issuer_credential_id")
+  issuerDid         String    @map("issuer_did")
+  issuerName        String    @map("issuer_name")
+  credentialType    String    @map("credential_type")
+  status            String    @default("active")
+  metadata          Json
+  issuedAt          DateTime  @map("issued_at") @db.Timestamptz(6)
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("credentials")
+}
+
+enum CredentialStatus {
+  active
+  expired
+  revoked
+
+  @@map("credential_status")
 }
 
 model Verifier {

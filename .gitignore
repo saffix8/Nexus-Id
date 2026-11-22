@@ -32,6 +32,7 @@ dist/
 # Temporary/debug artifacts
 services/backend/NODE_OPTIONS=--experimental-vm-modules
 services/backend/tsc
+/NODE_OPTIONS=--experimental-vm-modules
 
 # Claude Code
 .claude/settings.local.json
@@ -43,5 +44,11 @@ services/backend/tsc
 **/*.jwk
 **/*.keystore
 **/keys/*.pem
-services/ml/venv/
 apps/mobile/android/app/*.keystore
+
+# Python ML service
+services/ml/.venv/
+services/ml/__pycache__/
+**/__pycache__/
+services/ml/data/
+services/ml/models/

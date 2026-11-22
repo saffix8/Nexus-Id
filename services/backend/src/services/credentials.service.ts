@@ -91,11 +91,18 @@ class CredentialsService {
     );
   }
 
-  async proxyNadraVerifyOtp(body: unknown, userId: string): Promise<unknown> {
+  async proxyNadraVerifyOtp(
+    body: { session_id: string; otp: string },
+    userId: string,
+  ): Promise<unknown> {
+    const user_public_key = await this.requirePublicKey(userId);
     const data = await this.forward<{
       success: boolean;
       data?: { credential: SDJWTCredential };
-    }>("post", `${NADRA_URL}/api/v1/credentials/nadra/verify-otp`, body);
+    }>("post", `${NADRA_URL}/api/v1/credentials/nadra/verify-otp`, {
+      ...body,
+      user_public_key,
+    });
 
     if (data.success && data.data?.credential) {
       await this.recordCredential(userId, data.data.credential);
@@ -103,11 +110,18 @@ class CredentialsService {
     return data;
   }
 
-  async proxyHecVerify(body: unknown, userId: string): Promise<unknown> {
+  async proxyHecVerify(
+    body: { degree_number: string; university: string; student_name: string },
+    userId: string,
+  ): Promise<unknown> {
+    const user_public_key = await this.requirePublicKey(userId);
     const data = await this.forward<{
       success: boolean;
       data?: { credential: SDJWTCredential };
-    }>("post", `${HEC_URL}/api/v1/credentials/hec/verify`, body);
+    }>("post", `${HEC_URL}/api/v1/credentials/hec/verify`, {
+      ...body,
+      user_public_key,
+    });
 
     if (data.success && data.data?.credential) {
       await this.recordCredential(userId, data.data.credential);
@@ -115,11 +129,18 @@ class CredentialsService {
     return data;
   }
 
-  async proxyAuScrape(body: unknown, userId: string): Promise<unknown> {
+  async proxyAuScrape(
+    body: { username: string; password: string; otp?: string },
+    userId: string,
+  ): Promise<unknown> {
+    const user_public_key = await this.requirePublicKey(userId);
     const data = await this.forward<{
       success: boolean;
       data?: { credential: SDJWTCredential };
-    }>("post", `${AU_URL}/api/v1/credentials/au/scrape`, body);
+    }>("post", `${AU_URL}/api/v1/credentials/au/scrape`, {
+      ...body,
+      user_public_key,
+    });
 
     if (data.success && data.data?.credential) {
       await this.recordCredential(userId, data.data.credential);
@@ -133,11 +154,17 @@ class CredentialsService {
       data?: { auth_url: string };
     }>("get", `${LINKEDIN_URL}/api/v1/credentials/linkedin/auth-url`);
 
-    const state = data.data?.auth_url
-      ? new URL(data.data.auth_url).searchParams.get("state")
-      : null;
+    const authUrl = data.data?.auth_url;
+    const state = authUrl ? new URL(authUrl).searchParams.get("state") : null;
 
     if (state) {
+      // Starting a new attempt supersedes any earlier abandoned one for
+      // this user — otherwise getLinkedinStatus's userId scan could return
+      // a stale "pending" from an old attempt and never surface this one.
+      for (const [existingState, entry] of pendingLinkedin) {
+        if (entry.userId === userId) pendingLinkedin.delete(existingState);
+      }
+
       // In-memory tracking only — same known limitation as NADRA's session
       // store (see .claude/rules/backend.md). Fine for a single-process dev
       // deployment; a real deployment would need Redis so this survives
@@ -145,14 +172,36 @@ class CredentialsService {
       pendingLinkedin.set(state, { userId, status: "pending" });
     }
 
+    // The popup navigates to this URL directly — it never passes back
+    // through this backend — so the holder's public key has to be threaded
+    // through the URL itself (the mock-consent page and /callback already
+    // forward it) rather than injected server-side like the other issuers.
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { publicKey: true },
+    });
+
+    if (authUrl && user?.publicKey && data.data) {
+      const url = new URL(authUrl);
+      url.searchParams.set("user_public_key", user.publicKey);
+      data.data.auth_url = url.toString();
+    }
+
     return data;
   }
 
-  async proxyLinkedinIssue(body: unknown, userId: string): Promise<unknown> {
+  async proxyLinkedinIssue(
+    body: { code: string; state: string },
+    userId: string,
+  ): Promise<unknown> {
+    const user_public_key = await this.requirePublicKey(userId);
     const data = await this.forward<{
       success: boolean;
       data?: { credential: SDJWTCredential };
-    }>("post", `${LINKEDIN_URL}/api/v1/credentials/linkedin/issue`, body);
+    }>("post", `${LINKEDIN_URL}/api/v1/credentials/linkedin/issue`, {
+      ...body,
+      user_public_key,
+    });
 
     if (data.success && data.data?.credential) {
       await this.recordCredential(userId, data.data.credential);
@@ -306,6 +355,23 @@ class CredentialsService {
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────
+
+  private async requirePublicKey(userId: string): Promise<string> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { publicKey: true },
+    });
+
+    if (!user?.publicKey) {
+      throw new CredentialsError(
+        "No public key on file for this account. Generate one before connecting a credential source.",
+        "NO_PUBLIC_KEY",
+        400,
+      );
+    }
+
+    return user.publicKey;
+  }
 
   private async recordCredential(
     userId: string,

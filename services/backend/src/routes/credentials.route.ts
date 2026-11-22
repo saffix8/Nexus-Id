@@ -152,7 +152,6 @@ router.post(
 const NadraVerifyOtpSchema = z.object({
   session_id: z.string().uuid("session_id must be a UUID"),
   otp: z.string().length(6, "otp must be 6 digits"),
-  user_public_key: z.string().min(1, "user_public_key is required"),
 });
 
 router.post(
@@ -193,7 +192,6 @@ const HecVerifySchema = z.object({
   degree_number: z.string().min(1, "degree_number is required"),
   university: z.string().min(1, "university is required"),
   student_name: z.string().min(1, "student_name is required"),
-  user_public_key: z.string().min(1, "user_public_key is required"),
 });
 
 router.post(
@@ -231,7 +229,6 @@ const AuScrapeSchema = z.object({
   username: z.string().min(1, "username is required"),
   password: z.string().min(1, "password is required"),
   otp: z.string().length(6).optional(),
-  user_public_key: z.string().min(1, "user_public_key is required"),
 });
 
 router.post(
@@ -296,7 +293,6 @@ router.get("/linkedin/status", (req: Request, res: Response): void => {
 const LinkedinIssueSchema = z.object({
   code: z.string().min(1, "code is required"),
   state: z.string().uuid("state must be a UUID"),
-  user_public_key: z.string().min(1, "user_public_key is required"),
 });
 
 router.post(

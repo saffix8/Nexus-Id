@@ -6,12 +6,15 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import type { SDJWTCredential } from "@nexusid/types";
+import { ensureWebKeypair } from "@/lib/webKeypair";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type CredentialSource = "nadra" | "hec" | "air-university" | "linkedin";
 
 type Step =
+  | { id: "preparing_key" }
+  | { id: "key_error"; message: string }
   | { id: "source_select" }
   | { id: "auth_flow"; source: CredentialSource }
   | { id: "otp"; source: "nadra"; sessionId: string }
@@ -781,6 +784,72 @@ function LinkedInFlow({
 
 // ─── Step: Processing ─────────────────────────────────────────────────────────
 
+function PreparingKeyStep() {
+  return (
+    <div className="p-10 flex flex-col items-center justify-center gap-4 min-h-[200px]">
+      <div
+        className="w-8 h-8 border-2 rounded-full animate-spin"
+        style={{ borderColor: T.border, borderTopColor: T.accent }}
+      />
+      <p className="text-sm" style={{ color: T.secondary }}>
+        Setting up your device key…
+      </p>
+    </div>
+  );
+}
+
+function KeyErrorStep({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col items-center gap-4 pt-2">
+        <div
+          className="w-16 h-16 rounded-full flex items-center justify-center"
+          style={{ background: T.dangerBg, border: "1px solid #4A1515" }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="#EF4444"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
+        <div className="text-center">
+          <p
+            className="text-lg font-semibold"
+            style={{ color: T.primary, fontFamily: "DM Sans, sans-serif" }}
+          >
+            Couldn't set up your device key
+          </p>
+          <p
+            className="text-sm mt-2 leading-relaxed"
+            style={{ color: T.secondary }}
+          >
+            {message}
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={onRetry}
+        className="w-full h-11 rounded-lg text-sm font-semibold"
+        style={{
+          background: `linear-gradient(135deg, ${T.accent}, ${T.accentEnd})`,
+          color: "#fff",
+        }}
+      >
+        Try Again
+      </button>
+    </div>
+  );
+}
+
 function ProcessingStep({ source }: { source: CredentialSource }) {
   const meta = SOURCE_META[source];
   return (
@@ -1005,15 +1074,26 @@ export function AddCredentialModal({
   onClose,
   onCredentialAdded,
 }: AddCredentialModalProps) {
-  const [step, setStep] = useState<Step>({ id: "source_select" });
+  const [step, setStep] = useState<Step>({ id: "preparing_key" });
 
-  // Reset on close
+  const prepareKey = useCallback(() => {
+    setStep({ id: "preparing_key" });
+    ensureWebKeypair()
+      .then(() => setStep({ id: "source_select" }))
+      .catch((err) =>
+        setStep({ id: "key_error", message: (err as Error).message }),
+      );
+  }, []);
+
+  // Ensure a device key exists before showing any issuer source; reset on close.
   useEffect(() => {
-    if (!isOpen) {
-      const t = setTimeout(() => setStep({ id: "source_select" }), 300);
+    if (isOpen) {
+      prepareKey();
+    } else {
+      const t = setTimeout(() => setStep({ id: "preparing_key" }), 300);
       return () => clearTimeout(t);
     }
-  }, [isOpen]);
+  }, [isOpen, prepareKey]);
 
   function handleClose() {
     onClose();
@@ -1158,6 +1238,12 @@ export function AddCredentialModal({
 
                 {/* Scrollable body */}
                 <div className="overflow-y-auto max-h-[70vh]">
+                  {step.id === "preparing_key" && <PreparingKeyStep />}
+
+                  {step.id === "key_error" && (
+                    <KeyErrorStep message={step.message} onRetry={prepareKey} />
+                  )}
+
                   {step.id === "source_select" && (
                     <SourceSelect onSelect={handleSelect} />
                   )}

@@ -97,6 +97,11 @@ router.get("/auth-url", (_req: Request, res: Response) => {
 const mockConsentQuerySchema = z.object({
   state: z.string().uuid(),
   redirect_uri: z.string().url(),
+  // Appended by the backend when the holder already has a public key on
+  // file (see credentials.service.ts's proxyLinkedinAuthUrl) — the popup
+  // navigates straight here and to /callback, bypassing the backend, so
+  // this is the only way to thread it through to buildCredential().
+  user_public_key: z.string().optional(),
 });
 
 router.get("/mock-consent", (req: Request, res: Response) => {
@@ -109,11 +114,14 @@ router.get("/mock-consent", (req: Request, res: Response) => {
     return res.status(400).send("Missing or invalid state/redirect_uri");
   }
 
-  const { state, redirect_uri } = parsed.data;
+  const { state, redirect_uri, user_public_key } = parsed.data;
 
   const authorizeUrl = new URL(redirect_uri);
   authorizeUrl.searchParams.set("code", "sandbox-fake-code");
   authorizeUrl.searchParams.set("state", state);
+  if (user_public_key) {
+    authorizeUrl.searchParams.set("user_public_key", user_public_key);
+  }
 
   const denyUrl = new URL(redirect_uri);
   denyUrl.searchParams.set("error", "access_denied");

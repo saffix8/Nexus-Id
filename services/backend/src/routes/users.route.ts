@@ -1,18 +1,19 @@
 // services/backend/src/routes/users.route.ts
 
-import { Router, Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
-import prisma from '../lib/prisma.js';
-import { verifyJWT } from '../middleware/auth.middleware.js';
-import { success, failure } from '../lib/response.js';
-import { register, login } from '../controllers/auth.controller.js';
-import { Prisma } from '@prisma/client';
+import { Router, Request, Response, NextFunction } from "express";
+import { z } from "zod";
+import prisma from "../lib/prisma.js";
+import { verifyJWT, requireSelf } from "../middleware/auth.middleware.js";
+import { success, failure } from "../lib/response.js";
+import { register, login } from "../controllers/auth.controller.js";
+import { Prisma } from "@prisma/client";
 
 const router = Router();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const RSA_PEM_REGEX = /^-----BEGIN PUBLIC KEY-----\s*[\s\S]+?\s*-----END PUBLIC KEY-----\s*$/;
+const RSA_PEM_REGEX =
+  /^-----BEGIN PUBLIC KEY-----\s*[\s\S]+?\s*-----END PUBLIC KEY-----\s*$/;
 
 function isValidRSAPEM(key: string): boolean {
   return RSA_PEM_REGEX.test(key.trim());
@@ -22,7 +23,7 @@ async function writeAuditLog(
   event_type: string,
   metadata: Record<string, unknown>,
   request_id?: string,
-  verifier_id?: string
+  verifier_id?: string,
 ): Promise<void> {
   await prisma.auditLog.create({
     data: {
@@ -37,35 +38,105 @@ async function writeAuditLog(
 // ── Zod Schemas ───────────────────────────────────────────────────────────────
 
 const UpdatePushTokenSchema = z.object({
-  push_token: z.string().min(1, 'push_token is required'),
+  push_token: z.string().min(1, "push_token is required"),
 });
 
 const UpdatePublicKeySchema = z.object({
   public_key: z
     .string()
-    .min(1, 'public_key is required')
+    .min(1, "public_key is required")
     .refine((val) => isValidRSAPEM(val), {
-      message: 'public_key must be a valid RSA PEM (BEGIN PUBLIC KEY … END PUBLIC KEY)',
+      message:
+        "public_key must be a valid RSA PEM (BEGIN PUBLIC KEY … END PUBLIC KEY)",
     }),
 });
 
 // ── POST /register, POST /login ──────────────────────────────────────────────
 
-router.post('/register', register);
-router.post('/login', login);
+router.post("/register", register);
+router.post("/login", login);
+
+// ── GET /me, PUT /me/public-key ───────────────────────────────────────────────
+// Self-referential convenience routes for the web dashboard — resolve the
+// user from the JWT instead of requiring the client to already know its
+// own ID, and sidestep the :id-param ownership check entirely. Registered
+// before the /:id/... routes below so "me" isn't matched as a literal ID.
+
+router.get(
+  "/me",
+  verifyJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.sub },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          publicKey: true,
+          createdAt: true,
+        },
+      });
+
+      if (!user) {
+        res.status(404).json(failure("User not found"));
+        return;
+      }
+
+      res.status(200).json(success(user));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.put(
+  "/me/public-key",
+  verifyJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const parsed = UpdatePublicKeySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res
+          .status(400)
+          .json(failure(parsed.error.issues.map((e) => e.message).join("; ")));
+        return;
+      }
+
+      const userId = req.user!.sub;
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          publicKey: parsed.data.public_key,
+          updatedAt: new Date(),
+        },
+      });
+
+      await writeAuditLog("public_key_updated", { user_id: userId });
+
+      res.status(200).json(success(null));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // ── PUT /:id/push-token ───────────────────────────────────────────────────────
 
 router.put(
-  '/:id/push-token',
+  "/:id/push-token",
   verifyJWT,
+  requireSelf,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = String(req.params.id);
 
       const parsed = UpdatePushTokenSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json(failure(parsed.error.issues.map((e) => e.message).join('; ')));
+        res
+          .status(400)
+          .json(failure(parsed.error.issues.map((e) => e.message).join("; ")));
         return;
       }
 
@@ -73,7 +144,7 @@ router.put(
 
       const existing = await prisma.user.findUnique({ where: { id } });
       if (!existing) {
-        res.status(404).json(failure('User not found'));
+        res.status(404).json(failure("User not found"));
         return;
       }
 
@@ -85,27 +156,30 @@ router.put(
         },
       });
 
-      await writeAuditLog('push_token_updated', { user_id: id });
+      await writeAuditLog("push_token_updated", { user_id: id });
 
       res.status(200).json(success(null));
     } catch (err) {
       next(err);
     }
-  }
+  },
 );
 
 // ── PUT /:id/public-key ───────────────────────────────────────────────────────
 
 router.put(
-  '/:id/public-key',
+  "/:id/public-key",
   verifyJWT,
+  requireSelf,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = String(req.params.id);
 
       const parsed = UpdatePublicKeySchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json(failure(parsed.error.issues.map((e) => e.message).join('; ')));
+        res
+          .status(400)
+          .json(failure(parsed.error.issues.map((e) => e.message).join("; ")));
         return;
       }
 
@@ -113,7 +187,7 @@ router.put(
 
       const existing = await prisma.user.findUnique({ where: { id } });
       if (!existing) {
-        res.status(404).json(failure('User not found'));
+        res.status(404).json(failure("User not found"));
         return;
       }
 
@@ -125,20 +199,21 @@ router.put(
         },
       });
 
-      await writeAuditLog('public_key_updated', { user_id: id });
+      await writeAuditLog("public_key_updated", { user_id: id });
 
       res.status(200).json(success(null));
     } catch (err) {
       next(err);
     }
-  }
+  },
 );
 
 // ── GET /:id/profile ──────────────────────────────────────────────────────────
 
 router.get(
-  '/:id/profile',
+  "/:id/profile",
   verifyJWT,
+  requireSelf,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = String(req.params.id);
@@ -154,7 +229,7 @@ router.get(
       });
 
       if (!user) {
-        res.status(404).json(failure('User not found'));
+        res.status(404).json(failure("User not found"));
         return;
       }
 
@@ -162,7 +237,7 @@ router.get(
     } catch (err) {
       next(err);
     }
-  }
+  },
 );
 
 export default router;

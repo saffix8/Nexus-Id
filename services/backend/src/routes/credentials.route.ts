@@ -11,10 +11,74 @@ import {
   CredentialsError,
 } from "../services/credentials.service.js";
 import { success, failure } from "../lib/response.js";
+import type { SDJWTCredential } from "@nexusid/types";
 
 const router = Router();
 
-// All credential-wallet routes require an authenticated user.
+// ---------------------------------------------------------------------------
+// POST /api/v1/credentials/linkedin/_internal/complete
+// Called server-to-server by the LinkedIn issuer once its OAuth callback
+// finishes — the browser popup lands there directly, so this is the only
+// way the backend learns the outcome. No user JWT exists for this call;
+// gated by a shared secret instead. Registered BEFORE router.use(verifyJWT)
+// below so it's exempt from that auth requirement.
+// ---------------------------------------------------------------------------
+
+const LinkedinCompleteSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    state: z.string().uuid(),
+    credential: z.unknown(),
+  }),
+  z.object({
+    success: z.literal(false),
+    state: z.string().uuid(),
+    error: z.string(),
+  }),
+]);
+
+router.post(
+  "/linkedin/_internal/complete",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const secret = req.headers["x-internal-secret"];
+      const expected =
+        process.env.INTERNAL_SERVICE_SECRET ?? "dev-internal-secret";
+      if (secret !== expected) {
+        res.status(401).json(failure("Invalid internal service secret"));
+        return;
+      }
+
+      const parsed = LinkedinCompleteSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res
+          .status(422)
+          .json(
+            failure(parsed.error.issues[0]?.message ?? "Validation failed"),
+          );
+        return;
+      }
+
+      if (parsed.data.success) {
+        await credentialsService.recordLinkedinCompletion(parsed.data.state, {
+          success: true,
+          credential: parsed.data.credential as SDJWTCredential,
+        });
+      } else {
+        await credentialsService.recordLinkedinCompletion(parsed.data.state, {
+          success: false,
+          error: parsed.data.error,
+        });
+      }
+
+      res.status(200).json(success({ acknowledged: true }));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// All credential-wallet routes below this line require an authenticated user.
 router.use(verifyJWT);
 
 // ---------------------------------------------------------------------------
@@ -198,20 +262,20 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// LinkedIn — auth-url passthrough + synchronous issue
-// NOTE: the OAuth redirect + status-polling flow (auth-url -> popup ->
-// callback -> poll /status) is NOT implemented here. The LinkedIn issuer
-// service has no /status endpoint and there is no session tracking between
-// the callback and a poller. This only wires the auth-url passthrough and
-// the synchronous /issue path (code + state obtained out of band). Flagging
-// rather than building the full OAuth round-trip, which is a separate task.
+// LinkedIn — auth-url -> popup -> callback -> poll /status, plus the
+// synchronous /issue path for code+state obtained out of band. In sandbox
+// mode auth-url points at the issuer's own mock consent page (there's no
+// real LinkedIn app behind our sandbox client id), and the issuer notifies
+// this backend server-to-server via /linkedin/_internal/complete once its
+// callback finishes, since the popup lands there directly.
 // ---------------------------------------------------------------------------
 
 router.get(
   "/linkedin/auth-url",
-  async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await credentialsService.proxyLinkedinAuthUrl();
+      const userId = req.user!.sub;
+      const data = await credentialsService.proxyLinkedinAuthUrl(userId);
       res.status(200).json(data);
     } catch (err) {
       if (err instanceof CredentialsError) {
@@ -222,6 +286,12 @@ router.get(
     }
   },
 );
+
+router.get("/linkedin/status", (req: Request, res: Response): void => {
+  const userId = req.user!.sub;
+  const result = credentialsService.getLinkedinStatus(userId);
+  res.status(200).json(success(result));
+});
 
 const LinkedinIssueSchema = z.object({
   code: z.string().min(1, "code is required"),
@@ -249,6 +319,67 @@ router.post(
         userId,
       );
       res.status(200).json(data);
+    } catch (err) {
+      if (err instanceof CredentialsError) {
+        handleServiceError(err, res);
+      } else {
+        next(err);
+      }
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Revocation — checked and set against our own Credential row (source of
+// truth for this deployment), with a best-effort fail-open cross-check
+// against the Fabric chain audit trail (blockchain.service.ts).
+// ---------------------------------------------------------------------------
+
+router.get(
+  "/:id/revocation",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = req.user!.sub;
+      const result = await credentialsService.checkRevocation(
+        String(req.params.id),
+        userId,
+      );
+      res.status(200).json(success(result));
+    } catch (err) {
+      if (err instanceof CredentialsError) {
+        handleServiceError(err, res);
+      } else {
+        next(err);
+      }
+    }
+  },
+);
+
+const RevokeSchema = z.object({
+  reason: z.string().min(1, "reason is required"),
+});
+
+router.post(
+  "/:id/revoke",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const parsed = RevokeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res
+          .status(422)
+          .json(
+            failure(parsed.error.issues[0]?.message ?? "Validation failed"),
+          );
+        return;
+      }
+
+      const userId = req.user!.sub;
+      await credentialsService.revokeCredential(
+        String(req.params.id),
+        userId,
+        parsed.data.reason,
+      );
+      res.status(200).json(success({ revoked: true }));
     } catch (err) {
       if (err instanceof CredentialsError) {
         handleServiceError(err, res);

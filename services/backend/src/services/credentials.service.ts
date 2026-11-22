@@ -1,5 +1,6 @@
 import axios from "axios";
 import prisma from "../lib/prisma.js";
+import { blockchainService } from "./blockchain.service.js";
 import type { SDJWTCredential, CredentialMetadata } from "@nexusid/types";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,34 @@ export interface CredentialListItem {
   revokedAt: string | null;
 }
 
+export interface RevocationResult {
+  revoked: boolean;
+  revokedAt: string | null;
+  reason: string | null;
+}
+
+export interface LinkedinStatusResult {
+  status: "pending" | "completed" | "failed";
+  credential?: SDJWTCredential;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// LinkedIn OAuth pending-connection tracking.
+// In-memory, single-process only — same known limitation as NADRA's OTP
+// session store (see .claude/rules/backend.md). A real deployment needs
+// Redis so this survives restarts and works across multiple instances.
+// ---------------------------------------------------------------------------
+
+interface PendingLinkedinEntry {
+  userId: string;
+  status: "pending" | "completed" | "failed";
+  credential?: SDJWTCredential;
+  error?: string;
+}
+
+const pendingLinkedin = new Map<string, PendingLinkedinEntry>();
+
 class CredentialsService {
   // ── Issuer proxies ──────────────────────────────────────────────────────
 
@@ -98,11 +127,25 @@ class CredentialsService {
     return data;
   }
 
-  async proxyLinkedinAuthUrl(): Promise<unknown> {
-    return this.forward(
-      "get",
-      `${LINKEDIN_URL}/api/v1/credentials/linkedin/auth-url`,
-    );
+  async proxyLinkedinAuthUrl(userId: string): Promise<unknown> {
+    const data = await this.forward<{
+      success: boolean;
+      data?: { auth_url: string };
+    }>("get", `${LINKEDIN_URL}/api/v1/credentials/linkedin/auth-url`);
+
+    const state = data.data?.auth_url
+      ? new URL(data.data.auth_url).searchParams.get("state")
+      : null;
+
+    if (state) {
+      // In-memory tracking only — same known limitation as NADRA's session
+      // store (see .claude/rules/backend.md). Fine for a single-process dev
+      // deployment; a real deployment would need Redis so this survives
+      // restarts and works across multiple backend instances.
+      pendingLinkedin.set(state, { userId, status: "pending" });
+    }
+
+    return data;
   }
 
   async proxyLinkedinIssue(body: unknown, userId: string): Promise<unknown> {
@@ -115,6 +158,54 @@ class CredentialsService {
       await this.recordCredential(userId, data.data.credential);
     }
     return data;
+  }
+
+  // Called by the LinkedIn issuer itself (server-to-server) once its OAuth
+  // callback finishes, since the browser popup redirects there directly —
+  // the backend has no other way to learn the outcome of that round trip.
+  async recordLinkedinCompletion(
+    state: string,
+    outcome:
+      | { success: true; credential: SDJWTCredential }
+      | { success: false; error: string },
+  ): Promise<void> {
+    const pending = pendingLinkedin.get(state);
+    if (!pending) return; // unknown/expired state — nothing to update
+
+    if (outcome.success) {
+      await this.recordCredential(pending.userId, outcome.credential);
+      pendingLinkedin.set(state, {
+        userId: pending.userId,
+        status: "completed",
+        credential: outcome.credential,
+      });
+    } else {
+      pendingLinkedin.set(state, {
+        userId: pending.userId,
+        status: "failed",
+        error: outcome.error,
+      });
+    }
+  }
+
+  // Polled by the frontend. Consumes (deletes) the entry once it reaches a
+  // terminal state, so a later unrelated connect attempt doesn't see stale
+  // results — mirrors NADRA's single-use OTP session semantics.
+  getLinkedinStatus(userId: string): LinkedinStatusResult {
+    for (const [state, entry] of pendingLinkedin) {
+      if (entry.userId !== userId) continue;
+
+      if (entry.status === "pending") {
+        return { status: "pending" };
+      }
+
+      pendingLinkedin.delete(state);
+      return entry.status === "completed"
+        ? { status: "completed", credential: entry.credential }
+        : { status: "failed", error: entry.error };
+    }
+
+    return { status: "pending" };
   }
 
   // ── Listing ─────────────────────────────────────────────────────────────
@@ -143,6 +234,75 @@ class CredentialsService {
       expiresAt: row.expiresAt.toISOString(),
       revokedAt: row.revokedAt?.toISOString() ?? null,
     }));
+  }
+
+  // ── Revocation ──────────────────────────────────────────────────────────
+  // Postgres `Credential.status` is the source of truth for this deployment.
+  // The Fabric chain audit trail (blockchain.service.ts) is cross-checked on
+  // a best-effort basis and fails open by design — Fabric isn't running in
+  // this environment, so this just confirms what Postgres already says
+  // unless/until a real chaincode network is stood up.
+
+  async checkRevocation(
+    credentialId: string,
+    userId: string,
+  ): Promise<RevocationResult> {
+    const row = await prisma.credential.findFirst({
+      where: { id: credentialId, userId },
+    });
+    if (!row) {
+      throw new CredentialsError("Credential not found", "NOT_FOUND", 404);
+    }
+
+    if (row.status === "revoked") {
+      return {
+        revoked: true,
+        revokedAt: row.revokedAt?.toISOString() ?? null,
+        reason: null,
+      };
+    }
+
+    const chainStatus = await blockchainService.checkRevocation(
+      row.issuerCredentialId,
+    );
+    if (chainStatus.revoked) {
+      const revokedAt = chainStatus.revokedAt
+        ? new Date(chainStatus.revokedAt)
+        : new Date();
+      await prisma.credential.update({
+        where: { id: row.id },
+        data: { status: "revoked", revokedAt },
+      });
+      return {
+        revoked: true,
+        revokedAt: revokedAt.toISOString(),
+        reason: chainStatus.reason ?? null,
+      };
+    }
+
+    return { revoked: false, revokedAt: null, reason: null };
+  }
+
+  async revokeCredential(
+    credentialId: string,
+    userId: string,
+    reason: string,
+  ): Promise<void> {
+    const row = await prisma.credential.findFirst({
+      where: { id: credentialId, userId },
+    });
+    if (!row) {
+      throw new CredentialsError("Credential not found", "NOT_FOUND", 404);
+    }
+
+    const revokedAt = new Date();
+    await prisma.credential.update({
+      where: { id: row.id },
+      data: { status: "revoked", revokedAt },
+    });
+
+    // Fire-and-forget — fails silently by design (see blockchain.service.ts)
+    void blockchainService.logRevocation(row.issuerCredentialId, reason);
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────

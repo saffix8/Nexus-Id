@@ -95,6 +95,22 @@ export class LinkedInOAuthClient {
     const state = randomUUID();
     this.stateMap.set(state, { timestamp: Date.now() });
 
+    // In sandbox mode there is no real LinkedIn app behind `this.clientId`,
+    // so sending the browser to the real LinkedIn OAuth server would always
+    // fail with "invalid client_id" before ever reaching our callback. Send
+    // it to our own mock consent page instead, which redirects back to the
+    // same redirectURI with a fake code — completing the exact same round
+    // trip exchangeCodeForToken()/getProfile()/getPositions() already
+    // simulate, without depending on a real LinkedIn app registration.
+    if (this.useSandbox) {
+      const mockParams = new URLSearchParams({
+        state,
+        redirect_uri: this.redirectURI,
+      });
+      const port = process.env.PORT ?? "4004";
+      return `http://localhost:${port}/api/v1/credentials/linkedin/mock-consent?${mockParams.toString()}`;
+    }
+
     const params = new URLSearchParams({
       response_type: "code",
       client_id: this.clientId,

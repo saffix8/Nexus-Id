@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
+import axios from "axios";
 import { linkedInOAuthClient, LinkedInOAuthError } from "./oauth-client.js";
 import {
   buildCredential,
@@ -19,6 +20,58 @@ function failure(error: string): ApiResponse<never> {
   return { success: false, error, timestamp: new Date().toISOString() };
 }
 
+const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:4000";
+const INTERNAL_SECRET =
+  process.env.INTERNAL_SERVICE_SECRET ?? "dev-internal-secret";
+
+// Best-effort, fire-and-forget notification to the backend — the browser
+// popup lands on /callback directly, so this is the only way the backend
+// (which tracks the pending connection by `state`) learns the outcome.
+async function notifyBackend(
+  state: string,
+  outcome:
+    | { success: true; credential: SDJWTCredential }
+    | { success: false; error: string },
+): Promise<void> {
+  try {
+    await axios.post(
+      `${BACKEND_URL}/api/v1/credentials/linkedin/_internal/complete`,
+      { state, ...outcome },
+      { headers: { "X-Internal-Secret": INTERNAL_SECRET }, timeout: 5000 },
+    );
+  } catch (err) {
+    console.error(
+      "[LinkedIn Issuer] Failed to notify backend of OAuth completion (non-fatal):",
+      (err as Error).message,
+    );
+  }
+}
+
+// Renders the page the popup window lands on after the callback completes.
+// Attempts the mobile deep link (harmless no-op in a desktop browser) and
+// closes the popup shortly after, since window.close() requires the window
+// to have been opened by script — true here, as AddCredentialModal opens
+// this flow via window.open() in a click handler.
+function renderPopupResult(
+  res: Response,
+  message: string,
+  deepLink: string,
+): void {
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html>
+<head><title>NexusID</title></head>
+<body style="font-family: sans-serif; text-align: center; margin-top: 100px;">
+  <p>${message}</p>
+  <p style="color:#888; font-size: 13px;">You can close this window.</p>
+  <script>
+    try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {}
+    setTimeout(function () { try { window.close(); } catch (e) {} }, 1200);
+  </script>
+</body>
+</html>`);
+}
+
 // ── GET /api/v1/credentials/linkedin/auth-url ─────────────────────────────────
 
 router.get("/auth-url", (_req: Request, res: Response) => {
@@ -32,6 +85,52 @@ router.get("/auth-url", (_req: Request, res: Response) => {
         : "Failed to generate authorization URL";
     return res.status(500).json(failure(message));
   }
+});
+
+// ── GET /api/v1/credentials/linkedin/mock-consent ─────────────────────────────
+// Sandbox-only stand-in for LinkedIn's real consent screen. There is no real
+// LinkedIn app behind our sandbox client id, so getAuthorizationURL() sends
+// the browser here instead of to linkedin.com. Authorize/Deny both redirect
+// back to the real redirect_uri (our own /callback) exactly like the real
+// LinkedIn OAuth server would.
+
+const mockConsentQuerySchema = z.object({
+  state: z.string().uuid(),
+  redirect_uri: z.string().url(),
+});
+
+router.get("/mock-consent", (req: Request, res: Response) => {
+  if (process.env.LINKEDIN_USE_SANDBOX === "false") {
+    return res.status(404).send("Not found");
+  }
+
+  const parsed = mockConsentQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).send("Missing or invalid state/redirect_uri");
+  }
+
+  const { state, redirect_uri } = parsed.data;
+
+  const authorizeUrl = new URL(redirect_uri);
+  authorizeUrl.searchParams.set("code", "sandbox-fake-code");
+  authorizeUrl.searchParams.set("state", state);
+
+  const denyUrl = new URL(redirect_uri);
+  denyUrl.searchParams.set("error", "access_denied");
+  denyUrl.searchParams.set("state", state);
+
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html>
+<head><title>NexusID Sandbox — LinkedIn</title></head>
+<body style="font-family: sans-serif; max-width: 420px; margin: 80px auto; text-align: center;">
+  <h2 style="color:#0A66C2;">LinkedIn (Sandbox)</h2>
+  <p>NexusID is requesting access to your profile and employment history.</p>
+  <p style="color:#888; font-size: 13px;">This is a simulated consent screen — no real LinkedIn account is involved.</p>
+  <a href="${authorizeUrl.toString()}" style="display:inline-block; margin:8px; padding:10px 20px; background:#0A66C2; color:white; text-decoration:none; border-radius:6px;">Authorize</a>
+  <a href="${denyUrl.toString()}" style="display:inline-block; margin:8px; padding:10px 20px; background:#eee; color:#333; text-decoration:none; border-radius:6px;">Deny</a>
+</body>
+</html>`);
 });
 
 // ── GET /api/v1/credentials/linkedin/callback ─────────────────────────────────
@@ -49,7 +148,13 @@ router.get("/callback", async (req: Request, res: Response) => {
     const description = String(
       req.query.error_description ?? "User denied access",
     );
-    return res.redirect(
+    const stateParam = req.query.state;
+    if (typeof stateParam === "string") {
+      await notifyBackend(stateParam, { success: false, error: description });
+    }
+    return renderPopupResult(
+      res,
+      "Authorization was denied.",
       `nexusid://credential-added?status=error&reason=${encodeURIComponent(description)}`,
     );
   }
@@ -57,7 +162,13 @@ router.get("/callback", async (req: Request, res: Response) => {
   const parsed = callbackQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     const errors = parsed.error.errors.map((e) => e.message).join("; ");
-    return res.redirect(
+    const stateParam = req.query.state;
+    if (typeof stateParam === "string") {
+      await notifyBackend(stateParam, { success: false, error: errors });
+    }
+    return renderPopupResult(
+      res,
+      "Something went wrong.",
       `nexusid://credential-added?status=error&reason=${encodeURIComponent(errors)}`,
     );
   }
@@ -80,21 +191,31 @@ router.get("/callback", async (req: Request, res: Response) => {
       linkedInOAuthClient.getPositions(accessToken),
     ]);
 
-    // If no public key was provided we cannot issue a bound credential.
-    // Redirect with the raw profile so the mobile app can retry with a key.
+    // If no public key was provided we cannot issue a bound credential. This
+    // is a real, separate gap — nothing in the web dashboard flow collects
+    // a holder public key for ANY issuer today — not fixed here.
     if (!userPublicKey) {
+      const reason =
+        "No public key available for this holder — connect a device first.";
+      await notifyBackend(state, { success: false, error: reason });
       const profileParam = encodeURIComponent(
         JSON.stringify({ id: profile.id, firstName: profile.firstName }),
       );
-      return res.redirect(
+      return renderPopupResult(
+        res,
+        "Almost there — a device key is needed to finish.",
         `nexusid://credential-added?status=pending&profile=${profileParam}`,
       );
     }
 
     const credential = await buildCredential(profile, positions, userPublicKey);
 
+    await notifyBackend(state, { success: true, credential });
+
     const credParam = encodeURIComponent(JSON.stringify(credential));
-    return res.redirect(
+    return renderPopupResult(
+      res,
+      "LinkedIn connected successfully.",
       `nexusid://credential-added?status=success&credential=${credParam}`,
     );
   } catch (err) {
@@ -108,7 +229,11 @@ router.get("/callback", async (req: Request, res: Response) => {
       reason = err.message;
     }
 
-    return res.redirect(
+    await notifyBackend(state, { success: false, error: reason });
+
+    return renderPopupResult(
+      res,
+      "Something went wrong.",
       `nexusid://credential-added?status=error&reason=${encodeURIComponent(reason)}`,
     );
   }

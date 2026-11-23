@@ -1,5 +1,6 @@
 import axios from "axios";
 import prisma from "../lib/prisma.js";
+import { sdJwtCredentialId } from "../lib/sd-jwt-payload.js";
 import { blockchainService } from "./blockchain.service.js";
 import type { SDJWTCredential, CredentialMetadata } from "@nexusid/types";
 
@@ -42,6 +43,9 @@ const ISSUER_DISPLAY_NAMES: Record<string, string> = {
 
 export interface CredentialListItem {
   id: string;
+  /** The issuer's credential id (SDJWTCredential.id) — lets a client-side
+   *  wallet match its stored SD-JWT to this row's revocation status. */
+  issuerCredentialId: string;
   issuerDid: string;
   issuerName: string;
   credentialType: string;
@@ -269,6 +273,7 @@ class CredentialsService {
 
     return rows.map((row) => ({
       id: row.id,
+      issuerCredentialId: row.issuerCredentialId,
       issuerDid: row.issuerDid,
       issuerName: row.issuerName,
       credentialType: row.credentialType,
@@ -382,6 +387,9 @@ class CredentialsService {
       create: {
         userId,
         issuerCredentialId: credential.id,
+        // SD-JWT `jti` — lets the verifier find this row from a presented
+        // proof and refuse revoked credentials (BR-006).
+        credentialJti: sdJwtCredentialId(credential.sd_jwt),
         issuerDid: credential.issuer,
         issuerName:
           ISSUER_DISPLAY_NAMES[credential.issuer] ?? credential.issuer,

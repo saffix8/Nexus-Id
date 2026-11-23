@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const AUTH_COOKIE = 'nexusid_token';
+/** Service Provider portal session (SRS FR-033) — separate from the End User cookie. */
+export const VERIFIER_COOKIE = 'nexusid_verifier_token';
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET ?? 'fallback-dev-secret-change-in-production'
 );

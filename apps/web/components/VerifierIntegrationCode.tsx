@@ -5,21 +5,23 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 
 interface VerifierIntegrationCodeProps {
+  /** Service Provider API key (SRS FR-034) — the backend identifies the verifier from it. */
+  apiKey: string;
   verifierId: string;
   verifierName: string;
   fields: string[];
   callbackUrl?: string;
 }
 
-export function VerifierIntegrationCode({ verifierId, verifierName, fields, callbackUrl }: VerifierIntegrationCodeProps) {
+export function VerifierIntegrationCode({ apiKey, verifierId, verifierName, fields, callbackUrl }: VerifierIntegrationCodeProps) {
   const [copied, setCopied] = useState(false);
 
-  const nonce = 'GENERATED_SERVER_SIDE_PER_REQUEST';
+  // No data-nonce: the extension generates a fresh single-use nonce per request.
   const snippet = `<div id="nexusid-verify"
+     data-api-key="${apiKey}"
      data-verifier-id="${verifierId}"
      data-verifier-name="${verifierName}"
-     data-fields="${fields.join(',')}"
-     data-nonce="${nonce}"${callbackUrl ? `\n     data-callback-url="${callbackUrl}"` : ''}>
+     data-fields="${fields.join(',')}"${callbackUrl ? `\n     data-callback-url="${callbackUrl}"` : ''}>
 </div>`;
 
   const copy = async () => {

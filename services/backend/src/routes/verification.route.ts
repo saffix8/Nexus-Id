@@ -1,9 +1,19 @@
-import { Router, type Request, type Response, type NextFunction } from 'express';
-import { z } from 'zod';
-import { verifyJWT } from '../middleware/auth.middleware.js';
-import { verificationService, VerificationError } from '../services/verification.service.js';
-import { success, failure } from '../lib/response.js';
-import type { Proof } from '@nexusid/types';
+import {
+  Router,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
+import { z } from "zod";
+import { verifyJWT } from "../middleware/auth.middleware.js";
+import { requireApiKey } from "../middleware/api-key.middleware.js";
+import { PAIRING_SECRET_HEADER } from "../services/pairing.service.js";
+import {
+  verificationService,
+  VerificationError,
+} from "../services/verification.service.js";
+import { success, failure } from "../lib/response.js";
+import type { Proof } from "@nexusid/types";
 
 const router = Router();
 
@@ -11,37 +21,22 @@ const router = Router();
 // Zod validation schemas
 // ---------------------------------------------------------------------------
 
+// The verifier is identified by its API key (see requireApiKey), never by a
+// field in the body.
 const CreateRequestSchema = z.object({
-  verifierId: z
-    .string()
-    .min(1, 'verifierId is required')
-    .max(255),
-  verifierName: z
-    .string()
-    .min(1, 'verifierName is required')
-    .max(255),
   requestedFields: z
     .array(z.string().min(1))
-    .min(1, 'At least one field must be requested')
-    .max(20, 'Too many requested fields'),
-  nonce: z
-    .string()
-    .min(8, 'nonce must be at least 8 characters')
-    .max(512),
-  callbackUrl: z
-    .string()
-    .url('callbackUrl must be a valid URL')
-    .optional(),
-  pageUrl: z
-    .string()
-    .min(1, 'pageUrl is required')
-    .max(2048),
+    .min(1, "At least one field must be requested")
+    .max(20, "Too many requested fields"),
+  nonce: z.string().min(8, "nonce must be at least 8 characters").max(512),
+  callbackUrl: z.string().url("callbackUrl must be a valid URL").optional(),
+  pageUrl: z.string().min(1, "pageUrl is required").max(2048),
 });
 
 const SubmitProofSchema = z.object({
   verification_requestId: z
     .string()
-    .uuid('verification_requestId must be a UUID'),
+    .uuid("verification_requestId must be a UUID"),
   proof: z.object({
     presentation: z.object({
       sd_jwt: z.string().min(1),
@@ -82,19 +77,31 @@ function handleServiceError(err: unknown, res: Response): void {
 // ---------------------------------------------------------------------------
 // POST /api/v1/verification/request
 // Called by the browser extension when it detects a nexusid-verify element.
+// Authenticated with the Service Provider's API key (SRS FR-034).
 // ---------------------------------------------------------------------------
 
 router.post(
-  '/request',
+  "/request",
+  requireApiKey,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const parsed = CreateRequestSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(422).json(failure(parsed.error.issues[0]?.message ?? 'Validation failed'));
+        res
+          .status(422)
+          .json(
+            failure(parsed.error.issues[0]?.message ?? "Validation failed"),
+          );
         return;
       }
 
-      const result = await verificationService.createRequest(parsed.data);
+      const verifier = req.verifier!;
+      const result = await verificationService.createRequest({
+        ...parsed.data,
+        verifierId: verifier.id,
+        verifierName: verifier.displayName,
+        pairingSecret: req.header(PAIRING_SECRET_HEADER) ?? "",
+      });
       res.status(200).json(success(result));
     } catch (err) {
       if (err instanceof VerificationError) {
@@ -108,22 +115,26 @@ router.post(
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/verification/request/:id
-// Polled by the browser extension every 5 seconds.
-// No auth required — requestId is the only secret needed here.
+// Polled by the browser extension / Service Provider every 5 seconds.
+// Requires the API key of the verifier that created the request.
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/request/:id',
+  "/request/:id",
+  requireApiKey,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { id } = req.params;
 
-      if (typeof id !== 'string' || !z.string().uuid().safeParse(id).success) {
-        res.status(400).json(failure('Invalid verification request ID'));
+      if (typeof id !== "string" || !z.string().uuid().safeParse(id).success) {
+        res.status(400).json(failure("Invalid verification request ID"));
         return;
       }
 
-      const result = await verificationService.pollRequest(id);
+      const result = await verificationService.pollRequest(
+        id,
+        req.verifier!.id,
+      );
 
       res.status(200).json(success(result));
     } catch (err) {
@@ -143,20 +154,24 @@ router.get(
 // ---------------------------------------------------------------------------
 
 router.post(
-  '/submit-proof',
+  "/submit-proof",
   verifyJWT,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const parsed = SubmitProofSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(422).json(failure(parsed.error.issues[0]?.message ?? 'Validation failed'));
+        res
+          .status(422)
+          .json(
+            failure(parsed.error.issues[0]?.message ?? "Validation failed"),
+          );
         return;
       }
 
       const user_id = req.user?.sub;
       if (!user_id) {
         // Should be impossible if verifyJWT ran — defensive guard
-        res.status(401).json(failure('User identity missing from token'));
+        res.status(401).json(failure("User identity missing from token"));
         return;
       }
 
@@ -183,20 +198,20 @@ router.post(
 // ---------------------------------------------------------------------------
 
 router.post(
-  '/reject/:id',
+  "/reject/:id",
   verifyJWT,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { id } = req.params;
 
-      if (!id || typeof id !== 'string') {
-        res.status(400).json(failure('Request ID is required'));
+      if (!id || typeof id !== "string") {
+        res.status(400).json(failure("Request ID is required"));
         return;
       }
 
       const user_id = req.user?.sub;
       if (!user_id) {
-        res.status(401).json(failure('User identity missing from token'));
+        res.status(401).json(failure("User identity missing from token"));
         return;
       }
 
@@ -213,24 +228,46 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/verification/pending
+// Requests routed to the signed-in End User that await approval (UC-004).
+// ---------------------------------------------------------------------------
+
+router.get(
+  "/pending",
+  verifyJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const result = await verificationService.getPendingForUser(req.user!.sub);
+      res.status(200).json(success(result));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/verification/history
 // Returns this user's paginated verification history.
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/history',
+  "/history",
   verifyJWT,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const parsed = HistoryQuerySchema.safeParse(req.query);
       if (!parsed.success) {
-        res.status(422).json(failure(parsed.error.issues[0]?.message ?? 'Invalid query params'));
+        res
+          .status(422)
+          .json(
+            failure(parsed.error.issues[0]?.message ?? "Invalid query params"),
+          );
         return;
       }
 
       const user_id = req.user?.sub;
       if (!user_id) {
-        res.status(401).json(failure('User identity missing from token'));
+        res.status(401).json(failure("User identity missing from token"));
         return;
       }
 

@@ -1,29 +1,31 @@
 /** @type {import('jest').Config} */
 module.exports = {
-  preset: 'ts-jest/presets/default-esm',
-  testEnvironment: 'node',
+  preset: "ts-jest/presets/default-esm",
+  testEnvironment: "node",
 
-  roots: ['<rootDir>/src'],
+  roots: ["<rootDir>/src"],
 
-  moduleFileExtensions: ['ts', 'js', 'json'],
+  moduleFileExtensions: ["ts", "js", "json"],
 
-  extensionsToTreatAsEsm: ['.ts'],
+  extensionsToTreatAsEsm: [".ts"],
 
   transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
+    "^.+\\.tsx?$": [
+      "ts-jest",
       {
         useESM: true,
-        tsconfig: '<rootDir>/tsconfig.json',
+        tsconfig: "<rootDir>/tsconfig.json",
       },
     ],
   },
 
   moduleNameMapper: {
-    '^(\\.{1,2}/.*)\\.js$': '$1',
+    "^(\\.{1,2}/.*)\\.js$": "$1",
   },
 
-  setupFiles: ['<rootDir>/../../jest.setup.cjs'],
+  // Redirects DATABASE_URL to the isolated test database (see jest.test-db.cjs).
+  setupFiles: ["<rootDir>/../../jest.setup.cjs"],
+  globalSetup: "<rootDir>/jest.global-setup.cjs",
+
+  testPathIgnorePatterns: ["/node_modules/", "/__tests__/helpers.ts"],
 };
-// jest.config.js (or wherever testPathIgnorePatterns lives)
-testPathIgnorePatterns: ['/node_modules/', '/__tests__/helpers.ts']

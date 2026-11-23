@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchVerifierRequests, type VerifierRequestRow } from '@/lib/verifierApi';
 import {
   LineChart,
   Line,
@@ -49,8 +50,8 @@ interface StatusBreakdown {
 interface RecentVerification {
   id: string;
   requestedFields: string[];
-  status: 'completed' | 'rejected' | 'expired';
-  responseTimeSec: number;
+  status: 'pending' | 'completed' | 'rejected' | 'expired';
+  responseTimeSec: number | null;
   createdAt: string;
 }
 
@@ -64,54 +65,85 @@ interface AnalyticsData {
 
 // ── Mock data (replaces API until backend is live) ────────────────────────────
 
-function generateMockData(): AnalyticsData {
-  const today = new Date();
+const DAY_MS = 86_400_000;
+
+function pctChange(current: number, previous: number): string {
+  if (previous === 0) return current === 0 ? '0%' : 'new';
+  const pct = ((current - previous) / previous) * 100;
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%`;
+}
+
+function successRate(rows: VerifierRequestRow[]): number {
+  const decided = rows.filter((r) => r.status !== 'pending');
+  if (decided.length === 0) return 0;
+  return Math.round((decided.filter((r) => r.status === 'completed').length / decided.length) * 1000) / 10;
+}
+
+function avgResponse(rows: VerifierRequestRow[]): number {
+  const times = rows.map((r) => r.responseTimeSec).filter((t): t is number => t !== null);
+  if (times.length === 0) return 0;
+  return Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10;
+}
+
+/** Overview analytics computed from this provider's real request log. */
+function buildAnalytics(rows: VerifierRequestRow[], now = new Date()): AnalyticsData {
+  const t = now.getTime();
+  const within = (from: number, to: number) =>
+    rows.filter((r) => {
+      const c = new Date(r.createdAt).getTime();
+      return c >= from && c < to;
+    });
+
+  const last30 = within(t - 30 * DAY_MS, t + 1);
+  const prev30 = within(t - 60 * DAY_MS, t - 30 * DAY_MS);
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+  const thisMonth = within(monthStart, t + 1);
+  const prevMonth = within(prevMonthStart, monthStart);
+
   const dailyVolume: DailyVolume[] = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - (29 - i));
+    const day = new Date(t - (29 - i) * DAY_MS);
+    const key = day.toDateString();
     return {
-      date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      count: Math.floor(Math.random() * 40 + 5),
+      date: day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      count: last30.filter((r) => new Date(r.createdAt).toDateString() === key).length,
     };
   });
 
+  const fieldCounts = new Map<string, number>();
+  for (const r of last30) for (const f of r.requestedFields) fieldCounts.set(f, (fieldCounts.get(f) ?? 0) + 1);
+  const fieldPopularity = [...fieldCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([field, count]) => ({ field, count }));
+
+  const count = (status: VerifierRequestRow['status']) => last30.filter((r) => r.status === status).length;
+  const statusBreakdown: StatusBreakdown[] = [
+    { name: 'Completed', value: count('completed'), color: '#22C55E' },
+    { name: 'Rejected', value: count('rejected'), color: '#EF4444' },
+    { name: 'Expired', value: count('expired'), color: '#525A72' },
+    { name: 'Pending', value: count('pending'), color: '#F59E0B' },
+  ].filter((s) => s.value > 0);
+
+  const respNow = avgResponse(last30);
+  const respPrev = avgResponse(prev30);
+
   return {
     kpi: {
-      totalVerifications: 1_284,
-      thisMonth: 247,
-      successRate: 91.4,
-      avgResponseTime: 8.3,
-      totalChange: '+12%',
-      monthChange: '+18%',
-      successChange: '+2.1%',
-      responseChange: '-1.2s',
+      totalVerifications: rows.length,
+      thisMonth: thisMonth.length,
+      successRate: successRate(last30),
+      avgResponseTime: respNow,
+      totalChange: pctChange(last30.length, prev30.length),
+      monthChange: pctChange(thisMonth.length, prevMonth.length),
+      successChange: `${(successRate(last30) - successRate(prev30)).toFixed(1)}%`,
+      responseChange: respPrev === 0 ? '—' : `${(respNow - respPrev).toFixed(1)}s`,
     },
     dailyVolume,
-    fieldPopularity: [
-      { field: 'degree_title', count: 312 },
-      { field: 'age_over_18', count: 289 },
-      { field: 'enrollment_status', count: 201 },
-      { field: 'current_company', count: 178 },
-      { field: 'full_name', count: 154 },
-    ],
-    statusBreakdown: [
-      { name: 'Completed', value: 1173, color: '#22C55E' },
-      { name: 'Rejected', value: 74, color: '#EF4444' },
-      { name: 'Expired', value: 37, color: '#525A72' },
-    ],
-    recent: Array.from({ length: 10 }, (_, i) => ({
-      id: `req_${Math.random().toString(36).slice(2, 10)}`,
-      requestedFields: [
-        ['degree_title', 'university'],
-        ['age_over_18', 'full_name'],
-        ['enrollment_status'],
-        ['current_company', 'current_title', 'experience_years'],
-        ['cnic', 'full_name'],
-      ][i % 5],
-      status: (['completed', 'completed', 'completed', 'rejected', 'expired'] as const)[i % 5],
-      responseTimeSec: parseFloat((Math.random() * 20 + 2).toFixed(1)),
-      createdAt: new Date(Date.now() - i * 3_600_000 * 2).toISOString(),
-    })),
+    fieldPopularity,
+    statusBreakdown,
+    recent: rows.slice(0, 10),
   };
 }
 
@@ -161,6 +193,7 @@ function StatusBadge({ status }: { status: RecentVerification['status'] }) {
     completed: { label: 'Completed', bg: '#0F2A1A', text: '#22C55E', border: '#16532F' },
     rejected:  { label: 'Rejected',  bg: '#250F0F', text: '#EF4444', border: '#4A1515' },
     expired:   { label: 'Expired',   bg: '#1A1E28', text: '#525A72', border: '#252C3D' },
+    pending:   { label: 'Pending',   bg: '#2A210F', text: '#F59E0B', border: '#4A3A15' },
   };
   const s = map[status];
   return (
@@ -222,22 +255,12 @@ export default function VerifierDashboardPage() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const token = document.cookie
-          .split('; ')
-          .find((c) => c.startsWith('nexusid_token='))
-          ?.split('=')[1];
-
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/analytics/verifications`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        if (!res.ok) throw new Error('API error');
-        const json = await res.json();
-        setData(json.data);
+        const to = new Date();
+        const from = new Date(to.getTime() - 365 * DAY_MS);
+        setData(buildAnalytics(await fetchVerifierRequests(from, to), to));
       } catch {
-        // Fall back to mock data so the UI is always populated during dev
-        setData(generateMockData());
+        // Show an honest empty state rather than invented numbers.
+        setData(buildAnalytics([]));
       } finally {
         setLoading(false);
       }
@@ -482,7 +505,7 @@ export default function VerifierDashboardPage() {
                       <StatusBadge status={row.status} />
                     </td>
                     <td className="py-3 pr-4">
-                      <span className="text-xs font-mono text-[#8B92A8]">{row.responseTimeSec}s</span>
+                      <span className="text-xs font-mono text-[#8B92A8]">{row.responseTimeSec === null ? '—' : `${row.responseTimeSec}s`}</span>
                     </td>
                     <td className="py-3">
                       <span className="text-xs text-[#525A72]">{formatRelative(row.createdAt)}</span>

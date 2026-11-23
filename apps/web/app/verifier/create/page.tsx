@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
+import { useVerifierProfile } from '@/lib/verifierApi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,38 +58,34 @@ const FIELD_GROUPS: FieldGroup[] = [
   },
 ];
 
-const VERIFIER_DOMAIN = 'demo-jobportal.com';
-const VERIFIER_NAME_DEFAULT = 'Demo Job Portal';
+// The snippet never contains a real key: keys are shown once on API Keys and
+// stored only as a hash (FR-034), so providers paste their own.
+const API_KEY_PLACEHOLDER = 'YOUR_API_KEY';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function generateNonce(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(12)))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
 
+// The NexusID browser extension detects this element, authenticates with
+// data-api-key, and generates a fresh single-use nonce per request — so the
+// snippet carries no nonce and needs no script tag.
 function buildSnippet(
   domain: string,
   displayName: string,
   fields: string[],
-  nonce: string,
+  apiKey: string,
   callbackUrl: string
 ): string {
   const lines = [
     `<div`,
     `  id="nexusid-verify"`,
+    `  data-api-key="${apiKey}"`,
     `  data-verifier-id="${domain}"`,
     `  data-verifier-name="${displayName}"`,
     `  data-fields="${fields.join(',')}"`,
-    `  data-nonce="${nonce}"`,
     callbackUrl ? `  data-callback-url="${callbackUrl}"` : null,
     `>`,
-    `  <!-- NexusID verification widget renders here -->`,
+    `  <!-- Detected by the NexusID browser extension -->`,
     `</div>`,
-    ``,
-    `<!-- Add once per page -->`,
-    `<script src="https://cdn.nexusid.com/widget.js" defer></script>`,
   ]
     .filter((l) => l !== null)
     .join('\n');
@@ -155,10 +153,14 @@ function CopyButton({ text }: { text: string }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CreateRequestPage() {
-  const [displayName, setDisplayName] = useState(VERIFIER_NAME_DEFAULT);
+  const { data: profile } = useVerifierProfile();
+  const domain = profile?.domain ?? 'yourcompany.com';
+  const [displayName, setDisplayName] = useState('');
+  useEffect(() => {
+    if (profile && !displayName) setDisplayName(profile.displayName);
+  }, [profile, displayName]);
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set(['age_over_18', 'degree_title']));
   const [callbackUrl, setCallbackUrl] = useState('');
-  const [nonce] = useState(() => generateNonce());
   const [testOpen, setTestOpen] = useState(false);
 
   const toggleField = useCallback((key: string) => {
@@ -171,7 +173,7 @@ export default function CreateRequestPage() {
   }, []);
 
   const fieldsArray = Array.from(selectedFields);
-  const snippet = buildSnippet(VERIFIER_DOMAIN, displayName, fieldsArray, nonce, callbackUrl);
+  const snippet = buildSnippet(domain, displayName, fieldsArray, API_KEY_PLACEHOLDER, callbackUrl);
 
   return (
     <div className="max-w-6xl">
@@ -194,7 +196,7 @@ export default function CreateRequestPage() {
                     <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.25" />
                     <path d="M4.5 7l2 2 3-3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  <span className="text-sm font-mono text-[#EEF0F6]">{VERIFIER_DOMAIN}</span>
+                  <span className="text-sm font-mono text-[#EEF0F6]">{domain}</span>
                   <span className="ml-auto text-[10px] font-mono tracking-wider uppercase text-[#22C55E] bg-[#0F2A1A] border border-[#16532F] px-1.5 py-0.5 rounded">
                     Verified
                   </span>
@@ -348,7 +350,7 @@ export default function CreateRequestPage() {
                   <span className="w-2 h-2 rounded-full bg-[#252C3D]" />
                 </div>
                 <div className="flex-1 bg-[#0A0C10] border border-[#1E2330] rounded text-[10px] font-mono text-[#525A72] px-2 py-0.5 text-center">
-                  {VERIFIER_DOMAIN}/apply
+                  {domain}/apply
                 </div>
               </div>
 
@@ -376,7 +378,7 @@ export default function CreateRequestPage() {
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-[#EEF0F6]">NexusID Verification</p>
-                      <p className="text-[10px] text-[#525A72]">by {displayName || VERIFIER_DOMAIN}</p>
+                      <p className="text-[10px] text-[#525A72]">by {displayName || domain}</p>
                     </div>
                   </div>
 
@@ -423,39 +425,27 @@ export default function CreateRequestPage() {
               <SectionNumberBadge n={4} />
               <span className="text-sm font-semibold text-[#EEF0F6]">Test It</span>
             </div>
-            <p className="text-xs text-[#525A72] mb-4">
-              Open a test page with a mock form to walk through the complete verification flow.
-            </p>
+            <ol className="text-xs text-[#8B92A8] space-y-2 mb-4 list-decimal list-inside">
+              <li>
+                Generate a key on{' '}
+                <Link href="/verifier/api-keys" className="text-[#3B6FE8] hover:text-[#4A7EF7]">API Keys</Link>{' '}
+                and put it in <code className="text-[#EEF0F6]">data-api-key</code>.
+              </li>
+              <li>Paste the snippet into a page and open it in Chrome with the NexusID extension installed and paired.</li>
+              <li>Approve on the paired device — the result appears on the page and in your Overview.</li>
+            </ol>
 
-            <button
-              disabled={selectedFields.size === 0}
-              onClick={() => {
-                const params = new URLSearchParams({
-                  verifier_id: VERIFIER_DOMAIN,
-                  verifier_name: displayName,
-                  fields: fieldsArray.join(','),
-                  nonce,
-                });
-                window.open(`/verifier/test?${params}`, '_blank');
-              }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+            <Link
+              href="/verifier/integration"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-all duration-150"
               style={{
                 background: 'rgba(59,111,232,0.1)',
                 color: '#3B6FE8',
                 border: '1px solid rgba(59,111,232,0.25)',
               }}
             >
-              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-                <path d="M3 8a5 5 0 1010 0A5 5 0 003 8z" stroke="currentColor" strokeWidth="1.25" />
-                <path d="M7 6l3 2-3 2V6z" fill="currentColor" />
-              </svg>
-              Test this verification
-              <span className="text-[10px] opacity-60">↗</span>
-            </button>
-
-            {selectedFields.size === 0 && (
-              <p className="text-[10px] text-[#525A72] mt-2 text-center">Select at least one field first</p>
-            )}
+              Full integration guide
+            </Link>
           </div>
         </div>
       </div>

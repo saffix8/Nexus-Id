@@ -1,18 +1,27 @@
 // apps/web/lib/webKeypair.ts
 //
-// There is no mobile device pairing wired up for the web dashboard (that's
-// FR-002/FR-003 — Android Keystore key generation + QR pairing, mobile-only
-// per CON-008). Issuing a credential still needs a holder public key to bind
-// to, so the web app generates its own RSA-2048 keypair in the browser the
-// first time one is needed, registers the public half with the backend, and
-// keeps the private half in localStorage — never sent to the server. This is
-// a separate, web-only keypair; it is not the mobile Android Keystore key.
+// There is no mobile device available to the web dashboard, but issuing and
+// presenting credentials needs a holder keypair. The web app therefore
+// generates its own RSA-2048 keypair in the browser the first time one is
+// needed and registers the public half with the backend. This is a separate,
+// web-only keypair; it is not the mobile Android Keystore key.
+//
+// The private key is a NON-EXTRACTABLE WebCrypto key kept in IndexedDB
+// (lib/webVault.ts): it can sign key-binding JWTs but can never be read out,
+// exported or sent anywhere — the browser analogue of CON-008.
 
-const STORAGE_KEY = "nexusid_web_keypair";
+import { vaultGet, vaultPut } from "@/lib/webVault";
 
-interface StoredKeypair {
+const KEYPAIR_ID = "signing-keypair";
+/** Pre-hardening store (PEMs in localStorage) — migrated once, then removed. */
+const LEGACY_STORAGE_KEY = "nexusid_web_keypair";
+
+const RSA_PARAMS = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" } as const;
+
+export interface WebSigningKey {
   publicKeyPem: string;
-  privateKeyPem: string;
+  /** Non-extractable — usable only for signing. */
+  privateKey: CryptoKey;
 }
 
 function arrayBufferToPem(buffer: ArrayBuffer, label: string): string {
@@ -24,40 +33,49 @@ function arrayBufferToPem(buffer: ArrayBuffer, label: string): string {
   return `-----BEGIN ${label}-----\n${lines.join("\n")}\n-----END ${label}-----\n`;
 }
 
-async function generateKeypair(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey(
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256",
-    },
-    true,
-    ["sign", "verify"],
-  );
+function pemToArrayBuffer(pem: string): ArrayBuffer {
+  const base64 = pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
 }
 
-async function exportKeypairPem(pair: CryptoKeyPair): Promise<StoredKeypair> {
-  const [spki, pkcs8] = await Promise.all([
-    crypto.subtle.exportKey("spki", pair.publicKey),
-    crypto.subtle.exportKey("pkcs8", pair.privateKey),
-  ]);
-
-  return {
-    publicKeyPem: arrayBufferToPem(spki, "PUBLIC KEY"),
-    privateKeyPem: arrayBufferToPem(pkcs8, "PRIVATE KEY"),
-  };
-}
-
-export function getStoredWebKeypair(): StoredKeypair | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
+/** Imports a pre-hardening PEM keypair as a non-extractable key, then deletes the PEM. */
+async function migrateLegacyKeypair(): Promise<WebSigningKey | null> {
+  const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
   if (!raw) return null;
+
   try {
-    return JSON.parse(raw) as StoredKeypair;
+    const legacy = JSON.parse(raw) as {
+      publicKeyPem: string;
+      privateKeyPem: string;
+    };
+    const privateKey = await crypto.subtle.importKey(
+      "pkcs8",
+      pemToArrayBuffer(legacy.privateKeyPem),
+      RSA_PARAMS,
+      false, // non-extractable from now on
+      ["sign"],
+    );
+    const migrated: WebSigningKey = {
+      publicKeyPem: legacy.publicKeyPem,
+      privateKey,
+    };
+    await vaultPut("keys", KEYPAIR_ID, migrated);
+    return migrated;
   } catch {
     return null;
+  } finally {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   }
+}
+
+/** This browser's holder signing key, or null if none has been created yet. */
+export async function getWebSigningKey(): Promise<WebSigningKey | null> {
+  if (typeof window === "undefined") return null;
+  const stored = await vaultGet<WebSigningKey>("keys", KEYPAIR_ID);
+  return stored ?? (await migrateLegacyKeypair());
 }
 
 /**
@@ -65,11 +83,22 @@ export function getStoredWebKeypair(): StoredKeypair | null {
  * keypair with the backend if one doesn't already exist locally.
  */
 export async function ensureWebKeypair(): Promise<string> {
-  const existing = getStoredWebKeypair();
+  const existing = await getWebSigningKey();
   if (existing) return existing.publicKeyPem;
 
-  const pair = await generateKeypair();
-  const { publicKeyPem, privateKeyPem } = await exportKeypairPem(pair);
+  const pair = await crypto.subtle.generateKey(
+    {
+      ...RSA_PARAMS,
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+    },
+    false, // private key non-extractable (the public key is always exportable)
+    ["sign", "verify"],
+  );
+  const publicKeyPem = arrayBufferToPem(
+    await crypto.subtle.exportKey("spki", pair.publicKey),
+    "PUBLIC KEY",
+  );
 
   const res = await fetch("/api/v1/users/me/public-key", {
     method: "PUT",
@@ -85,10 +114,10 @@ export async function ensureWebKeypair(): Promise<string> {
 
   // Only persist locally once the backend has confirmed it — otherwise a
   // failed registration would get cached and silently never retried.
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ publicKeyPem, privateKeyPem }),
-  );
+  await vaultPut("keys", KEYPAIR_ID, {
+    publicKeyPem,
+    privateKey: pair.privateKey,
+  });
 
   return publicKeyPem;
 }

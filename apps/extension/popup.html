@@ -328,6 +328,69 @@
 
     .btn:active { opacity: 0.75; }
 
+    .btn-primary {
+      background: linear-gradient(135deg, #3B6FE8, #5B4FE8);
+      color: #FFFFFF;
+      width: 100%;
+    }
+
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── PAIRING (UC-002) ───────────────────────────── */
+    .pairing-card {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid #1E2330;
+      border-radius: 8px;
+      background: #13161E;
+      text-align: left;
+    }
+
+    .pairing-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .pairing-status { font-size: 12px; font-weight: 500; }
+    .pairing-status.paired { color: #22C55E; }
+    .pairing-status.unpaired { color: #F59E0B; }
+
+    .pairing-hint { font-size: 11px; color: #525A72; margin: 4px 0 10px; }
+
+    .link-btn {
+      background: none;
+      border: none;
+      color: #525A72;
+      font-size: 11px;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .pairing-panel { padding: 16px; text-align: center; }
+    .pairing-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .pairing-sub { font-size: 12px; color: #8B92A8; margin-bottom: 14px; }
+
+    .qr-frame {
+      display: inline-block;
+      padding: 10px;
+      background: #FFFFFF;
+      border-radius: 8px;
+      line-height: 0;
+    }
+
+    .qr-frame.expired { opacity: 0.25; }
+
+    .pairing-expiry {
+      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+      font-size: 11px;
+      color: #525A72;
+      margin: 10px 0 12px;
+    }
+
+    .pairing-error { font-size: 12px; color: #EF4444; margin: 8px 0; }
+
     .btn-cancel {
       background: transparent;
       border: 1px solid #4A1515;
@@ -569,12 +632,40 @@
         </div>
         <p class="idle-title">No pending verifications</p>
         <p class="idle-sub">Visit a website with NexusID verification to get started.</p>
+
+        <!-- Device pairing status (SRS UC-002, FR-003) -->
+        <div class="pairing-card" id="pairing-card">
+          <div class="pairing-row">
+            <span class="pairing-status unpaired" id="pairing-status">Not paired with your phone</span>
+            <button class="link-btn" id="forget-pairing-btn" style="display:none;">Forget</button>
+          </div>
+          <p class="pairing-hint" id="pairing-hint">Pair once so verification requests reach your NexusID app.</p>
+          <button class="btn btn-primary" id="pair-btn">Pair device</button>
+        </div>
+
         <a href="#" class="dashboard-link" id="open-dashboard-idle">
           Open Dashboard
           <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2 6h8M6 2l4 4-4 4"/>
           </svg>
         </a>
+      </div>
+    </div>
+
+    <!-- ─── STATE: PAIRING (UC-002) ───────────────── -->
+    <div class="state-panel" id="state-pairing">
+      <div class="pairing-panel">
+        <p class="pairing-title">Scan with the NexusID app</p>
+        <p class="pairing-sub">Open the app on your phone, choose “Pair browser”, and scan this code.</p>
+        <div class="qr-frame" id="qr-frame">
+          <canvas id="qr-canvas" width="180" height="180"></canvas>
+        </div>
+        <p class="pairing-expiry" id="pairing-expiry">—</p>
+        <p class="pairing-error" id="pairing-error" style="display:none;"></p>
+        <!-- For pairing from the web dashboard instead of scanning -->
+        <button class="link-btn" id="copy-code-btn" style="margin-bottom:8px;">Copy code instead</button><br />
+        <button class="btn btn-primary" id="new-code-btn" style="display:none;">Generate new code</button>
+        <button class="link-btn" id="cancel-pairing-btn">Cancel</button>
       </div>
     </div>
 
@@ -675,6 +766,7 @@
 
 </div><!-- /popup-wrapper -->
 
+<script src="qrcode.vendor.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

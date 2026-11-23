@@ -40,28 +40,28 @@ function unauthorizedResponse(message: string): ApiResponse<never> {
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
+/** Role claim carried by Service Provider portal tokens (SRS FR-033). */
+export const VERIFIER_ROLE = 'verifier';
+
+type BearerResult =
+  | { ok: true; payload: JWTPayload }
+  | { ok: false; error: string };
+
 /**
- * verifyJWT
- * Reads `Authorization: Bearer <token>`, verifies it, and attaches the
- * decoded payload to `req.user`. Returns 401 on any failure.
+ * Shared Bearer-token check used by every JWT middleware below, so token
+ * verification lives in exactly one place.
  */
-export async function verifyJWT(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
+async function verifyBearer(req: Request): Promise<BearerResult> {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json(unauthorizedResponse('Missing or malformed Authorization header'));
-    return;
+    return { ok: false, error: 'Missing or malformed Authorization header' };
   }
 
   const token = authHeader.slice(7); // strip "Bearer "
 
   if (!token) {
-    res.status(401).json(unauthorizedResponse('Token is empty'));
-    return;
+    return { ok: false, error: 'Token is empty' };
   }
 
   try {
@@ -72,16 +72,13 @@ export async function verifyJWT(
 
     // Ensure required sub claim is present
     if (typeof payload.sub !== 'string' || !payload.sub) {
-      res.status(401).json(unauthorizedResponse('Invalid token: missing subject claim'));
-      return;
+      return { ok: false, error: 'Invalid token: missing subject claim' };
     }
 
-    req.user = payload as JWTPayload;
-    next();
+    return { ok: true, payload: payload as JWTPayload };
   } catch (err) {
     if (err instanceof JoseErrors.JWTExpired) {
-      res.status(401).json(unauthorizedResponse('Token has expired'));
-      return;
+      return { ok: false, error: 'Token has expired' };
     }
 
     if (
@@ -89,13 +86,67 @@ export async function verifyJWT(
       err instanceof JoseErrors.JWTInvalid ||
       err instanceof JoseErrors.JWSSignatureVerificationFailed
     ) {
-      res.status(401).json(unauthorizedResponse('Invalid token signature'));
-      return;
+      return { ok: false, error: 'Invalid token signature' };
     }
 
     // Unknown error — don't leak internals
-    res.status(401).json(unauthorizedResponse('Token verification failed'));
+    return { ok: false, error: 'Token verification failed' };
   }
+}
+
+/**
+ * verifyJWT
+ * End User routes. Reads `Authorization: Bearer <token>`, verifies it, and
+ * attaches the decoded payload to `req.user`. Service Provider tokens are
+ * refused — their `sub` is a verifier ID, not a user ID. Returns 401 on any
+ * failure.
+ */
+export async function verifyJWT(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const result = await verifyBearer(req);
+
+  if (!result.ok) {
+    res.status(401).json(unauthorizedResponse(result.error));
+    return;
+  }
+
+  if (result.payload.role === VERIFIER_ROLE) {
+    res.status(401).json(unauthorizedResponse('Service Provider tokens cannot access End User routes'));
+    return;
+  }
+
+  req.user = result.payload;
+  next();
+}
+
+/**
+ * requireVerifierJWT
+ * Service Provider portal routes (SRS FR-033/FR-034). Accepts only tokens
+ * issued by the provider login (role = "verifier"); `req.user.sub` is then
+ * the Verifier ID.
+ */
+export async function requireVerifierJWT(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const result = await verifyBearer(req);
+
+  if (!result.ok) {
+    res.status(401).json(unauthorizedResponse(result.error));
+    return;
+  }
+
+  if (result.payload.role !== VERIFIER_ROLE) {
+    res.status(401).json(unauthorizedResponse('A Service Provider login is required'));
+    return;
+  }
+
+  req.user = result.payload;
+  next();
 }
 
 /**

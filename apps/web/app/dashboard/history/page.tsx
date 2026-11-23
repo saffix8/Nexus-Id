@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { FIELD_CATEGORY } from '@/lib/verifierApi';
 import {
   LineChart,
   Line,
@@ -20,9 +21,12 @@ type Status = 'completed' | 'rejected' | 'expired';
 
 interface VerificationRow {
   id: string;
+  /** Requesting platform (UC-006). */
+  verifierName: string;
   requestedFields: string[];
   status: Status;
-  responseTimeSec: number;
+  /** null when the request expired without a decision */
+  responseTimeSec: number | null;
   credentialType: 'identity' | 'education' | 'employment' | 'enrollment';
   createdAt: string;
 }
@@ -51,37 +55,43 @@ interface AnalyticsPayload {
   };
 }
 
-// ── Mock data generator ───────────────────────────────────────────────────────
+// ── Real data → payload ───────────────────────────────────────────────────────
 
-function mockData(from: Date, to: Date): AnalyticsPayload {
-  const FIELDS = [
-    'degree_title', 'university', 'age_over_18', 'full_name',
-    'enrollment_status', 'current_company', 'current_title', 'cnic',
-    'year_of_award', 'experience_years',
-  ];
-  const CRED_TYPES: VerificationRow['credentialType'][] = [
-    'education', 'identity', 'employment', 'enrollment',
-  ];
-  const STATUSES: Status[] = ['completed', 'completed', 'completed', 'rejected', 'expired'];
+/** One entry from GET /api/v1/verification/history (MOD-6, UC-006). */
+interface HistoryRecord {
+  requestId: string;
+  verifierName: string;
+  requestedFields: string[];
+  status: Status;
+  decidedAt: string | null;
+  created_at: string;
+}
 
-  // Build rows spanning the date range
-  const msRange = to.getTime() - from.getTime();
-  const rows: VerificationRow[] = Array.from({ length: 120 }, (_, i) => {
-    const createdAt = new Date(from.getTime() + Math.random() * msRange);
-    const status = STATUSES[Math.floor(Math.random() * STATUSES.length)];
-    const numFields = Math.floor(Math.random() * 3) + 1;
-    const shuffled = [...FIELDS].sort(() => Math.random() - 0.5).slice(0, numFields);
-    return {
-      id: `req_${i.toString(16).padStart(8, '0')}`,
-      requestedFields: shuffled,
-      status,
-      responseTimeSec: parseFloat((Math.random() * 25 + 1).toFixed(1)),
-      credentialType: CRED_TYPES[Math.floor(Math.random() * CRED_TYPES.length)],
-      createdAt: createdAt.toISOString(),
-    };
-  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+async function fetchHistory(): Promise<HistoryRecord[]> {
+  const res = await fetch('/api/v1/verification/history?limit=100', { credentials: 'include' });
+  const json = (await res.json()) as { success: boolean; data?: HistoryRecord[]; error?: string };
+  if (!res.ok || !json.success || !json.data) throw new Error(json.error ?? 'Failed to load history');
+  return json.data;
+}
 
-  // Build daily time-series
+function buildPayload(records: HistoryRecord[], from: Date, to: Date): AnalyticsPayload {
+  const rows: VerificationRow[] = records
+    .filter((r) => {
+      const c = new Date(r.created_at).getTime();
+      return c >= from.getTime() && c <= to.getTime();
+    })
+    .map((r) => ({
+      id: r.requestId,
+      verifierName: r.verifierName,
+      requestedFields: r.requestedFields,
+      status: r.status,
+      responseTimeSec: r.decidedAt
+        ? Math.round((new Date(r.decidedAt).getTime() - new Date(r.created_at).getTime()) / 100) / 10
+        : null,
+      credentialType: FIELD_CATEGORY[r.requestedFields[0] ?? ''] ?? 'identity',
+      createdAt: r.created_at,
+    }));
+
   const dayMap: Record<string, DailyPoint> = {};
   const cursor = new Date(from);
   while (cursor <= to) {
@@ -95,7 +105,6 @@ function mockData(from: Date, to: Date): AnalyticsPayload {
   });
   const daily = Object.values(dayMap);
 
-  // Field stats
   const fieldMap: Record<string, number> = {};
   rows.forEach((r) => r.requestedFields.forEach((f) => { fieldMap[f] = (fieldMap[f] ?? 0) + 1; }));
   const fieldStats = Object.entries(fieldMap)
@@ -105,9 +114,8 @@ function mockData(from: Date, to: Date): AnalyticsPayload {
   const completed = rows.filter((r) => r.status === 'completed').length;
   const rejected  = rows.filter((r) => r.status === 'rejected').length;
   const expired   = rows.filter((r) => r.status === 'expired').length;
-  const avgRT = parseFloat(
-    (rows.reduce((s, r) => s + r.responseTimeSec, 0) / rows.length).toFixed(1)
-  );
+  const times = rows.map((r) => r.responseTimeSec).filter((t): t is number => t !== null);
+  const avgRT = times.length ? parseFloat((times.reduce((a, b) => a + b, 0) / times.length).toFixed(1)) : 0;
 
   return { rows, daily, fieldStats, totals: { completed, rejected, expired, avgResponseTime: avgRT } };
 }
@@ -115,13 +123,13 @@ function mockData(from: Date, to: Date): AnalyticsPayload {
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 function exportCSV(rows: VerificationRow[]) {
-  const header = ['Request ID', 'Status', 'Fields', 'Credential Type', 'Response Time (s)', 'Date'];
+  const header = ['Platform', 'Status', 'Fields', 'Credential Type', 'Response Time (s)', 'Date'];
   const lines = rows.map((r) => [
-    r.id,
+    `"${r.verifierName.replace(/"/g, '""')}"`,
     r.status,
     r.requestedFields.join(' | '),
     r.credentialType,
-    r.responseTimeSec,
+    r.responseTimeSec ?? '',
     new Date(r.createdAt).toLocaleString(),
   ].join(','));
   const csv = [header.join(','), ...lines].join('\n');
@@ -227,21 +235,12 @@ export default function AnalyticsPage() {
     setLoading(true);
     setPage(1);
     try {
-      const token = document.cookie
-        .split('; ')
-        .find((c) => c.startsWith('nexusid_token='))
-        ?.split('=')[1];
-
-      const params = new URLSearchParams({ from: fromDate, to: toDate });
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/analytics/verifications?${params}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) throw new Error();
-      const json = await res.json();
-      setData(json.data);
+      const from = new Date(fromDate);
+      const to = new Date(`${toDate}T23:59:59.999`);
+      setData(buildPayload(await fetchHistory(), from, to));
     } catch {
-      setData(mockData(new Date(fromDate), new Date(toDate)));
+      // Honest empty state — never invented numbers.
+      setData(buildPayload([], new Date(fromDate), new Date(toDate)));
     } finally {
       setLoading(false);
     }
@@ -528,7 +527,7 @@ export default function AnalyticsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#1E2330]">
-                {['Request ID', 'Fields Requested', 'Credential', 'Status', 'Response', 'Date'].map((h) => (
+                {['Platform', 'Fields Requested', 'Credential', 'Status', 'Response', 'Date'].map((h) => (
                   <th
                     key={h}
                     className="text-left text-[10px] font-mono tracking-wider uppercase text-[#525A72] px-6 py-3 first:pl-6"
@@ -558,7 +557,7 @@ export default function AnalyticsPage() {
                 pageRows.map((row) => (
                   <tr key={row.id} className="hover:bg-[#1A1E28]/40 transition-colors">
                     <td className="px-6 py-3.5">
-                      <span className="text-xs font-mono text-[#525A72]">{row.id}</span>
+                      <span className="text-sm text-[#EEF0F6]" title={row.id}>{row.verifierName}</span>
                     </td>
                     <td className="px-6 py-3.5">
                       <div className="flex flex-wrap gap-1">
@@ -588,12 +587,13 @@ export default function AnalyticsPage() {
                       <span
                         className="text-xs font-mono"
                         style={{
-                          color: row.responseTimeSec < 10 ? '#22C55E'
+                          color: row.responseTimeSec === null ? '#525A72'
+                               : row.responseTimeSec < 10 ? '#22C55E'
                                : row.responseTimeSec < 20 ? '#F59E0B'
                                : '#EF4444',
                         }}
                       >
-                        {row.responseTimeSec}s
+                        {row.responseTimeSec === null ? '—' : `${row.responseTimeSec}s`}
                       </span>
                     </td>
                     <td className="px-6 py-3.5">

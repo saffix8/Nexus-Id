@@ -8,34 +8,38 @@ datasource db {
 }
 
 model User {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  publicKey  String?   @map("public_key")
-  pushToken  String?  @map("push_token")
-  deviceInfo Json?    @map("device_info")
-  email        String?  @unique
-  passwordHash String?  @map("password_hash")
-  name         String?
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  credentials Credential[]
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicKey            String?               @map("public_key")
+  pushToken            String?               @map("push_token")
+  deviceInfo           Json?                 @map("device_info")
+  email                String?               @unique
+  passwordHash         String?               @map("password_hash")
+  name                 String?
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  credentials          Credential[]
+  pairings             DevicePairing[]
+  verificationRequests VerificationRequest[]
 
   @@map("users")
 }
 
 model Credential {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String    @map("user_id") @db.Uuid
-  issuerCredentialId String   @unique @map("issuer_credential_id")
-  issuerDid         String    @map("issuer_did")
-  issuerName        String    @map("issuer_name")
-  credentialType    String    @map("credential_type")
-  status            String    @default("active")
-  metadata          Json
-  issuedAt          DateTime  @map("issued_at") @db.Timestamptz(6)
-  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
-  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  issuerCredentialId String    @unique @map("issuer_credential_id")
+  /// `jti` of the issued SD-JWT — matches presented proofs to this row (BR-006).
+  credentialJti      String?   @unique @map("credential_jti")
+  issuerDid          String    @map("issuer_did")
+  issuerName         String    @map("issuer_name")
+  credentialType     String    @map("credential_type")
+  status             String    @default("active")
+  metadata           Json
+  issuedAt           DateTime  @map("issued_at") @db.Timestamptz(6)
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -56,7 +60,14 @@ model Verifier {
   domain               String                @unique
   displayName          String                @map("display_name")
   logoUrl              String?               @map("logo_url")
+  /// SHA-256 hex of the API key (FR-034). The plaintext key is shown once, never stored.
   apiKey               String                @unique @map("api_key")
+  /// First characters of the current key, for display only (e.g. "nxk_ab12").
+  apiKeyPrefix         String?               @map("api_key_prefix")
+  apiKeyRotatedAt      DateTime?             @map("api_key_rotated_at") @db.Timestamptz(6)
+  /// Service Provider portal login (FR-033, BR-008: unique across providers).
+  email                String?               @unique
+  passwordHash         String?               @map("password_hash")
   trusted              Boolean               @default(false)
   createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   verificationRequests VerificationRequest[]
@@ -67,6 +78,8 @@ model Verifier {
 model VerificationRequest {
   id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   verifierId      String?             @map("verifier_id") @db.Uuid
+  /// The End User this request was routed to, via the extension's pairing (FR-003).
+  userId          String?             @map("user_id") @db.Uuid
   requestedFields String[]            @map("requested_fields")
   nonce           String              @unique
   callbackUrl     String?             @map("callback_url")
@@ -78,10 +91,12 @@ model VerificationRequest {
   rejectedAt      DateTime?           @map("rejected_at") @db.Timestamptz(6)
   fraudFlags      FraudFlag[]
   verifier        Verifier?           @relation(fields: [verifierId], references: [id])
+  user            User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
   result          VerificationResult?
 
   @@index([status])
   @@index([verifierId])
+  @@index([userId])
   @@index([expiresAt])
   @@index([nonce])
   @@index([createdAt(sort: Desc)])
@@ -180,4 +195,27 @@ enum RiskLevel {
   HIGH
 
   @@map("risk_level")
+}
+
+/// Browser extension <-> mobile device pairing (SRS UC-002, FR-003, FR-024, BR-002).
+/// The extension creates a pending row and shows its code as a QR; the signed-in
+/// mobile app claims it, linking that browser session to the End User.
+/// Only SHA-256 hashes of the QR code and the extension's secret are stored.
+model DevicePairing {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codeHash   String    @unique @map("code_hash")
+  secretHash String    @unique @map("secret_hash")
+  userId     String?   @map("user_id") @db.Uuid
+  /// pending | paired | revoked  (an unclaimed row past expiresAt is expired)
+  status     String    @default("pending")
+  /// QR validity window — the code cannot be claimed after this (BR-002)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  pairedAt   DateTime? @map("paired_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("device_pairings")
 }

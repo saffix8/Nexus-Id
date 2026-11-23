@@ -559,6 +559,18 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+/**
+ * 128-bit random hex nonce. Uses getRandomValues, which (unlike randomUUID)
+ * is available on non-secure-context pages too.
+ */
+function generateNonce() {
+  var bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.prototype.map.call(bytes, function(b) {
+    return ('0' + b.toString(16)).slice(-2);
+  }).join('');
+}
+
 function formatFieldName(field) {
   return field.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
 }
@@ -580,21 +592,32 @@ function processElement(el) {
   el.dataset[PROCESSED_FLAG] = 'true';
 
   // ── Validate attributes ──────────────────────────────────────────────────
-  var verifierId   = (el.dataset.verifierId   || '').trim();
+  // data-api-key is the Service Provider's key (SRS FR-034). The backend
+  // identifies the verifier from it; data-verifier-id/-name are display only.
+  var apiKey       = (el.dataset.apiKey        || '').trim();
+  var verifierId   = (el.dataset.verifierId    || '').trim() || window.location.hostname || 'unknown-site';
   var verifierName = (el.dataset.verifierName  || '').trim();
   var fieldsRaw    = (el.dataset.fields        || '').trim();
-  var nonce        = (el.dataset.nonce         || '').trim();
+  var pageNonce    = (el.dataset.nonce         || '').trim();
   var callbackUrl  = (el.dataset.callbackUrl   || '').trim();
 
   var missing = [];
-  if (!verifierId)  missing.push('data-verifier-id');
+  if (!apiKey)      missing.push('data-api-key');
   if (!fieldsRaw)   missing.push('data-fields');
-  if (!nonce)       missing.push('data-nonce');
+  if (pageNonce && pageNonce.length < 8) missing.push('data-nonce (at least 8 characters)');
 
   if (missing.length > 0) {
     replaceContent(el, buildValidationErrorUI(missing));
     return;
   }
+
+  // ── Challenge nonce (SRS 3.3: the extension generates a unique nonce) ────
+  // A page-supplied nonce is used once; nonces are single-use on the backend,
+  // so a retry (or a page without data-nonce) gets a freshly generated one.
+  var nonce = (pageNonce && el._nexusidUsedNonce !== pageNonce)
+    ? pageNonce
+    : generateNonce();
+  el._nexusidUsedNonce = nonce;
 
   var requestedFields = fieldsRaw.split(',').map(function(f) { return f.trim(); }).filter(Boolean);
 
@@ -610,6 +633,7 @@ function processElement(el) {
     nonce:            nonce,
     callback_url:     callbackUrl || null,
     page_url:         window.location.href,
+    api_key:          apiKey,
   };
 
   try {
@@ -649,6 +673,31 @@ function processElement(el) {
   };
 }
 
+// ─── Notify the requesting website (SRS FR-017, FR-028) ──────────────────────
+
+/**
+ * Fires a `nexusid:result` DOM event on the site's #nexusid-verify element so
+ * the requesting platform's own page code learns the outcome — including a
+ * decline or timeout (FR-017). Bubbles, so a document-level listener works:
+ *
+ *   document.addEventListener('nexusid:result', e => {
+ *     // e.detail = { status: 'completed'|'rejected'|'expired'|'error',
+ *     //              requestId?: string,  // confirm server-side with your API key
+ *     //              verifiedFields?: {...}, error?: string }
+ *   });
+ *
+ * The site's backend should still confirm via
+ * GET /api/v1/verification/request/:id with its API key — page events are
+ * not a trust anchor.
+ */
+function notifyPage(el, detail) {
+  try {
+    el.dispatchEvent(new CustomEvent('nexusid:result', { bubbles: true, detail: detail }));
+  } catch (err) {
+    console.warn('[NexusID] Could not dispatch nexusid:result event:', err);
+  }
+}
+
 // ─── Background → Content message listener ────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
@@ -670,6 +719,7 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
 
     case 'VERIFICATION_COMPLETE':
       replaceContent(el, buildSuccessUI(message.verified_fields || {}));
+      notifyPage(el, { status: 'completed', requestId: message.backend_request_id || null, verifiedFields: message.verified_fields || {} });
       // Clean up
       if (requestId) { delete activeRequests[requestId]; }
       // Redirect if callback URL provided
@@ -680,16 +730,19 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
 
     case 'VERIFICATION_REJECTED':
       replaceContent(el, buildRejectedUI());
+      notifyPage(el, { status: 'rejected', requestId: message.backend_request_id || null });
       if (requestId) { delete activeRequests[requestId]; }
       break;
 
     case 'VERIFICATION_EXPIRED':
       replaceContent(el, buildExpiredUI(el._nexusidRetry ? el._nexusidRetry.bind(el) : null));
+      notifyPage(el, { status: 'expired', requestId: message.backend_request_id || null });
       if (requestId) { delete activeRequests[requestId]; }
       break;
 
     case 'VERIFICATION_ERROR':
       replaceContent(el, buildErrorUI(message.error));
+      notifyPage(el, { status: 'error', error: message.error });
       if (requestId) { delete activeRequests[requestId]; }
       break;
 

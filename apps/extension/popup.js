@@ -9,13 +9,27 @@
  *   pending   — request created, waiting for phone approval
  *   completed — proof received and verified
  *   rejected  — user rejected on phone (or manually cancelled here)
+ *   pairing   — showing the device-pairing QR code (SRS UC-002)
  */
 
 'use strict';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DASHBOARD_URL = 'http://localhost:3000/dashboard';
-const STORAGE_KEY_PREFIX = 'nexusid_vr_'; // storage keys: nexusid_vr_{requestId}
+const PAIRING_POLL_MS = 2000;
+
+/**
+ * background.js stores each verification under its local UUID (no prefix),
+ * so recognise records by shape rather than by key.
+ */
+function isVerificationRecord(record) {
+  return (
+    record !== null &&
+    typeof record === 'object' &&
+    typeof record.local_id === 'string' &&
+    typeof record.status === 'string'
+  );
+}
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const headerBadge          = document.getElementById('header-badge');
@@ -24,6 +38,19 @@ const stateIdle            = document.getElementById('state-idle');
 const statePending         = document.getElementById('state-pending');
 const stateCompleted       = document.getElementById('state-completed');
 const stateRejected        = document.getElementById('state-rejected');
+const statePairing         = document.getElementById('state-pairing');
+
+const pairingStatusEl      = document.getElementById('pairing-status');
+const pairingHintEl        = document.getElementById('pairing-hint');
+const pairBtn              = document.getElementById('pair-btn');
+const forgetPairingBtn     = document.getElementById('forget-pairing-btn');
+const qrFrame              = document.getElementById('qr-frame');
+const qrCanvas             = document.getElementById('qr-canvas');
+const pairingExpiryEl      = document.getElementById('pairing-expiry');
+const pairingErrorEl       = document.getElementById('pairing-error');
+const newCodeBtn           = document.getElementById('new-code-btn');
+const cancelPairingBtn     = document.getElementById('cancel-pairing-btn');
+const copyCodeBtn          = document.getElementById('copy-code-btn');
 
 const pendingVerifierName  = document.getElementById('pending-verifier-name');
 const pendingVerifierDomain= document.getElementById('pending-verifier-domain');
@@ -48,7 +75,7 @@ const openDashboardFooter  = document.getElementById('open-dashboard-footer');
  * @param {'idle'|'pending'|'completed'|'rejected'} name
  */
 function showState(name) {
-  [stateIdle, statePending, stateCompleted, stateRejected].forEach(el => {
+  [stateIdle, statePending, stateCompleted, stateRejected, statePairing].forEach(el => {
     el.classList.remove('active');
   });
 
@@ -58,6 +85,7 @@ function showState(name) {
     pending:   statePending,
     completed: stateCompleted,
     rejected:  stateRejected,
+    pairing:   statePairing,
   }[name];
 
   if (target) {
@@ -70,6 +98,7 @@ function showState(name) {
     pending:   { text: 'Pending',   cls: 'pending' },
     completed: { text: 'Verified',  cls: 'done' },
     rejected:  { text: 'Rejected',  cls: 'rejected' },
+    pairing:   { text: 'Pairing',   cls: 'pending' },
   };
 
   const cfg = badgeConfig[name] || badgeConfig.idle;
@@ -94,7 +123,8 @@ function renderPending(record) {
   fields.forEach(field => {
     const li = document.createElement('li');
     li.className = 'field-item';
-    li.innerHTML = `<span class="field-dot"></span>${formatFieldName(field)}`;
+    // Field names come from the web page — escape before injecting.
+    li.innerHTML = `<span class="field-dot"></span>${escapeHtml(formatFieldName(String(field)))}`;
     pendingFieldsList.appendChild(li);
   });
 
@@ -121,7 +151,7 @@ function renderCompleted(record) {
       const row = document.createElement('div');
       row.className = 'verified-field-row';
       row.innerHTML = `
-        <span class="verified-field-key">${formatFieldName(key)}</span>
+        <span class="verified-field-key">${escapeHtml(formatFieldName(key))}</span>
         <span class="verified-field-value">${escapeHtml(String(val))}</span>
       `;
       verifiedFieldsContainer.appendChild(row);
@@ -172,8 +202,8 @@ async function findActiveVerification() {
       const entries = [];
 
       Object.keys(items).forEach(key => {
-        if (!key.startsWith(STORAGE_KEY_PREFIX)) return;
         const record = items[key];
+        if (!isVerificationRecord(record)) return;
 
         // Skip entries older than 15 minutes (stale)
         const age = Date.now() - (record.created_at || 0);
@@ -210,7 +240,7 @@ async function refreshUI() {
   const active = await findActiveVerification();
 
   if (!active) {
-    showState('idle');
+    await renderIdle();
     return;
   }
 
@@ -227,7 +257,7 @@ async function refreshUI() {
       renderRejected(record);
       break;
     default:
-      showState('idle');
+      await renderIdle();
   }
 }
 
@@ -262,7 +292,7 @@ cancelBtn.addEventListener('click', async () => {
 
     // Tell background to stop polling
     chrome.runtime.sendMessage(
-      { type: 'CANCEL_VERIFICATION', request_id: record.request_id },
+      { type: 'CANCEL_VERIFICATION', request_id: record.local_id },
       _response => {
         // Ignore errors — even if background is unavailable, we clean up locally
         if (chrome.runtime.lastError) {
@@ -303,12 +333,197 @@ cancelBtn.addEventListener('click', async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
 
-  // Only care about NexusID verification records
-  const relevantChange = Object.keys(changes).some(k => k.startsWith(STORAGE_KEY_PREFIX));
-  if (!relevantChange) return;
+  // Only care about NexusID verification records, and never interrupt the
+  // pairing screen while a QR code is being scanned.
+  const relevantChange = Object.values(changes).some(
+    c => isVerificationRecord(c.newValue) || isVerificationRecord(c.oldValue)
+  );
+  if (!relevantChange || pairingTimers.poll) return;
 
   // Re-render with the new data
   refreshUI();
+});
+
+// ── Device pairing (SRS UC-002, FR-003, FR-024) ─────────────────────────────
+
+const pairingTimers = { poll: null, countdown: null };
+let currentQrPayload = null;
+
+function sendToBackground(message) {
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage(message, response => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response || { success: false, error: 'No response from background' });
+    });
+  });
+}
+
+/** Idle view: shows whether this browser is paired; resumes an open QR. */
+async function renderIdle() {
+  showState('idle');
+
+  const res = await sendToBackground({ type: 'CHECK_PAIRING' });
+  const state = res.success ? res.data : { status: 'unpaired' };
+
+  if (state.status === 'pending' && state.qr_payload) {
+    // A QR code is still waiting to be scanned — show it again.
+    showPairingQR(state);
+    return;
+  }
+
+  renderPairingCard(state);
+}
+
+function renderPairingCard(state) {
+  if (state.status === 'paired') {
+    pairingStatusEl.textContent = '✓ Paired with your NexusID app';
+    pairingStatusEl.className = 'pairing-status paired';
+    pairingHintEl.textContent = state.paired_at
+      ? `Since ${formatTime(new Date(state.paired_at))}. Revoke it from the app or dashboard.`
+      : 'Revoke it from the app or dashboard.';
+    pairBtn.style.display = 'none';
+    forgetPairingBtn.style.display = '';
+  } else {
+    pairingStatusEl.textContent = 'Not paired with your phone';
+    pairingStatusEl.className = 'pairing-status unpaired';
+    pairingHintEl.textContent = 'Pair once so verification requests reach your NexusID app.';
+    pairBtn.style.display = '';
+    forgetPairingBtn.style.display = 'none';
+  }
+}
+
+/** Draws the QR code onto the canvas with crisp, whole-pixel modules. */
+function drawQR(text) {
+  const qr = qrcode(0, 'M'); // type 0 = smallest version that fits
+  qr.addData(text);
+  qr.make();
+
+  const modules = qr.getModuleCount();
+  const cell = Math.max(2, Math.floor(180 / modules));
+  const size = modules * cell;
+
+  qrCanvas.width = size;
+  qrCanvas.height = size;
+
+  const ctx = qrCanvas.getContext('2d');
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000000';
+  for (let r = 0; r < modules; r++) {
+    for (let c = 0; c < modules; c++) {
+      if (qr.isDark(r, c)) ctx.fillRect(c * cell, r * cell, cell, cell);
+    }
+  }
+}
+
+function stopPairingTimers() {
+  clearInterval(pairingTimers.poll);
+  clearInterval(pairingTimers.countdown);
+  pairingTimers.poll = null;
+  pairingTimers.countdown = null;
+}
+
+function showPairingExpired() {
+  stopPairingTimers();
+  qrFrame.classList.add('expired');
+  copyCodeBtn.style.display = 'none';
+  currentQrPayload = null;
+  pairingExpiryEl.textContent = 'Code expired';
+  newCodeBtn.style.display = '';
+}
+
+function showPairingQR(state) {
+  stopPairingTimers();
+  showState('pairing');
+  pairingErrorEl.style.display = 'none';
+  newCodeBtn.style.display = 'none';
+  qrFrame.classList.remove('expired');
+  copyCodeBtn.style.display = '';
+  copyCodeBtn.textContent = 'Copy code instead';
+  currentQrPayload = state.qr_payload;
+  drawQR(state.qr_payload);
+
+  // BR-002 — visible validity window.
+  const expiresAt = new Date(state.expires_at).getTime();
+  const tick = () => {
+    const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+    if (left === 0) {
+      showPairingExpired();
+      return;
+    }
+    const m = Math.floor(left / 60);
+    const s = String(left % 60).padStart(2, '0');
+    pairingExpiryEl.textContent = `Expires in ${m}:${s}`;
+  };
+  tick();
+  pairingTimers.countdown = setInterval(tick, 1000);
+
+  // UC-002 step 5 — wait for the phone to claim the code.
+  pairingTimers.poll = setInterval(async () => {
+    const res = await sendToBackground({ type: 'CHECK_PAIRING' });
+    if (!res.success) return;
+    if (res.data.status === 'paired') {
+      stopPairingTimers();
+      await refreshUI();
+    } else if (res.data.status === 'expired' || res.data.status === 'unpaired') {
+      showPairingExpired();
+    }
+  }, PAIRING_POLL_MS);
+}
+
+async function startPairing() {
+  pairBtn.disabled = true;
+  newCodeBtn.disabled = true;
+  try {
+    const res = await sendToBackground({ type: 'START_PAIRING' });
+    if (!res.success) {
+      showState('pairing');
+      qrFrame.classList.add('expired');
+      copyCodeBtn.style.display = 'none';
+      currentQrPayload = null;
+      pairingExpiryEl.textContent = '';
+      pairingErrorEl.textContent = res.error || 'Could not start pairing.';
+      pairingErrorEl.style.display = '';
+      newCodeBtn.style.display = '';
+      return;
+    }
+    showPairingQR(res.data);
+  } finally {
+    pairBtn.disabled = false;
+    newCodeBtn.disabled = false;
+  }
+}
+
+pairBtn.addEventListener('click', startPairing);
+
+// Same payload as the QR — paste it into Dashboard → Devices to pair from the web.
+copyCodeBtn.addEventListener('click', async () => {
+  if (!currentQrPayload) return;
+  try {
+    await navigator.clipboard.writeText(currentQrPayload);
+    copyCodeBtn.textContent = 'Copied — paste it in Dashboard → Devices';
+  } catch {
+    copyCodeBtn.textContent = 'Could not copy';
+  }
+});
+newCodeBtn.addEventListener('click', startPairing);
+
+cancelPairingBtn.addEventListener('click', async () => {
+  stopPairingTimers();
+  // Drop the unclaimed code locally; it also expires server-side (BR-002).
+  const res = await sendToBackground({ type: 'CHECK_PAIRING' });
+  if (res.success && res.data.status !== 'paired') {
+    await sendToBackground({ type: 'FORGET_PAIRING' });
+  }
+  await refreshUI();
+});
+
+forgetPairingBtn.addEventListener('click', async () => {
+  await sendToBackground({ type: 'FORGET_PAIRING' });
+  await refreshUI();
 });
 
 // ── Formatting utilities ───────────────────────────────────────────────────
@@ -370,6 +585,6 @@ function escapeHtml(str) {
     await refreshUI();
   } catch (err) {
     console.error('[NexusID popup] Init error:', err);
-    showState('idle');
+    await renderIdle();
   }
 })();

@@ -1,25 +1,31 @@
 // apps/mobile/src/components/QRScanner.tsx
-// Scans a NexusID offline verification QR (produced by apps/web QRGenerator.tsx)
-// and decodes its payload for the verifier-side flow.
-// Requires: react-native-camera or react-native-vision-camera + a barcode scanner lib.
+// Camera QR scanner. Returns the raw decoded string; callers parse it
+// (e.g. PairBrowserScreen parses the extension's pairing payload).
+// Requires: react-native-vision-camera (useCodeScanner) — not installed yet,
+// so this renders a placeholder and never calls onScan.
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, spacing, typography } from '../styles/tokens';
 
 interface QRScannerProps {
-  onScan: (payload: { v: number; iss: string; sd_jwt: string; disclosures: string[]; iat: number; exp: number }) => void;
+  hint?: string;
+  onScan: (raw: string) => void;
   onCancel: () => void;
 }
 
-export function QRScanner({ onScan, onCancel }: QRScannerProps) {
-  // Wire up your chosen camera/barcode library's onRead callback to:
-  //   const decoded = JSON.parse(atob(base64urlToBase64(rawValue)));
-  //   if (Date.now() > decoded.exp) { /* show expired */ return; }
-  //   onScan(decoded);
+export function QRScanner({ hint, onScan: _onScan, onCancel }: QRScannerProps) {
+  // Once react-native-vision-camera is installed:
+  //   const codeScanner = useCodeScanner({
+  //     codeTypes: ['qr'],
+  //     onCodeScanned: codes => { const v = codes[0]?.value; if (v) _onScan(v); },
+  //   });
+  //   <Camera style={StyleSheet.absoluteFill} device={device} isActive codeScanner={codeScanner} />
   return (
     <View style={s.container}>
-      <Text style={s.hint}>Point your camera at the NexusID QR code</Text>
-      {/* <Camera onBarCodeRead={...} /> goes here once a camera lib is installed */}
+      <Text style={s.hint}>{hint ?? 'Point your camera at the NexusID QR code'}</Text>
+      <TouchableOpacity style={s.cancelBtn} onPress={onCancel}>
+        <Text style={s.cancelText}>Cancel</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -27,4 +33,6 @@ export function QRScanner({ onScan, onCancel }: QRScannerProps) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgBase, alignItems: 'center', justifyContent: 'center', padding: spacing[4] },
   hint: { color: colors.textSecondary, fontSize: typography.base, textAlign: 'center' },
+  cancelBtn: { marginTop: spacing[6], paddingVertical: spacing[3], paddingHorizontal: spacing[6] },
+  cancelText: { color: colors.textTertiary, fontSize: typography.base },
 });

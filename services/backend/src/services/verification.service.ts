@@ -1,9 +1,11 @@
-import { v4 as uuidv4 } from 'uuid';
-import { createHash } from 'crypto';
-import { verifyProof } from '@nexusid/sd-jwt';
-import prisma from '../lib/prisma.js';
-import { notificationService } from './notification.service.js';
-import type { Proof, VerificationStatus } from '@nexusid/types';
+import { v4 as uuidv4 } from "uuid";
+import { createHash } from "crypto";
+import { verifyProof } from "@nexusid/sd-jwt";
+import prisma from "../lib/prisma.js";
+import { notificationService } from "./notification.service.js";
+import { pairingService } from "./pairing.service.js";
+import { decodeSdJwtPayload, sdJwtCredentialId } from "../lib/sd-jwt-payload.js";
+import type { Proof, VerificationStatus } from "@nexusid/types";
 
 // ---------------------------------------------------------------------------
 // Typed error classes
@@ -16,7 +18,7 @@ export class VerificationError extends Error {
     public readonly statusCode: number = 400,
   ) {
     super(message);
-    this.name = 'VerificationError';
+    this.name = "VerificationError";
   }
 }
 
@@ -31,11 +33,13 @@ export interface CreateRequestParams {
   nonce: string;
   callbackUrl?: string;
   pageUrl: string;
+  /** Secret of the extension's device pairing (x-pairing-secret header). */
+  pairingSecret: string;
 }
 
 export interface CreateRequestResult {
   requestId: string;
-  status: 'queued';
+  status: "queued";
   notification_sent: boolean;
   expiresAt: string;
 }
@@ -55,7 +59,7 @@ export interface SubmitProofParams {
 }
 
 export interface SubmitProofResult {
-  status: 'verified';
+  status: "verified";
   verifiedFields: Record<string, unknown>;
   issuer: string;
   verifiedAt: string;
@@ -64,10 +68,29 @@ export interface SubmitProofResult {
 export interface HistoryRecord {
   requestId: string;
   verifierId: string;
+  /** Requesting platform (UC-006). */
+  verifierName: string;
+  requestedFields: string[];
+  /** When the user approved/declined; null if it expired unanswered. */
+  decidedAt: string | null;
   verifiedFields: Record<string, unknown> | null;
   verifiedAt: string | null;
   status: VerificationStatus;
   created_at: string;
+}
+
+export interface PendingRequest {
+  requestId: string;
+  /** Verifier UUID — the key-binding JWT's `aud` must equal this. */
+  verifierId: string;
+  verifierName: string;
+  verifierDomain: string | null;
+  requestedFields: string[];
+  /** Must be echoed in the key-binding JWT (BR-005). */
+  nonce: string;
+  pageUrl: string | null;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export interface HistoryResult {
@@ -90,7 +113,7 @@ function buildExpiresAt(): Date {
 }
 
 function sha256Hex(data: string): string {
-  return createHash('sha256').update(data).digest('hex');
+  return createHash("sha256").update(data).digest("hex");
 }
 
 /**
@@ -101,49 +124,23 @@ function sha256Hex(data: string): string {
  * Full cryptographic verification happens later in verifyProof().
  */
 function extractIssuerFromSDJWT(sdJwt: string): string {
-  // SD-JWT:
-  // <header>.<payload>.<signature>~<disclosure>~...
-  const jwtPart = sdJwt.split('~')[0];
-  const segments = jwtPart.split('.');
+  const payload = decodeSdJwtPayload(sdJwt);
 
-  if (segments.length < 3) {
+  if (!payload) {
     throw new VerificationError(
-      'Malformed SD-JWT: expected three dot-separated segments',
-      'INVALID_JWT',
+      "Malformed SD-JWT: payload could not be decoded",
+      "INVALID_JWT",
     );
   }
 
-  const payloadB64 = segments[1];
-
-  // base64url -> base64
-  const padded = payloadB64
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  const padding = (4 - (padded.length % 4)) % 4;
-  const b64 = padded + '='.repeat(padding);
-
-  const json = Buffer.from(b64, 'base64').toString('utf8');
-
-  let payload: Record<string, unknown>;
-
-  try {
-    payload = JSON.parse(json) as Record<string, unknown>;
-  } catch {
+  if (typeof payload["iss"] !== "string" || !payload["iss"]) {
     throw new VerificationError(
-      'SD-JWT payload is not valid JSON',
-      'INVALID_JWT',
+      "SD-JWT missing required `iss` claim",
+      "INVALID_JWT",
     );
   }
 
-  if (typeof payload['iss'] !== 'string' || !payload['iss']) {
-    throw new VerificationError(
-      'SD-JWT missing required `iss` claim',
-      'INVALID_JWT',
-    );
-  }
-
-  return payload['iss'];
+  return payload["iss"];
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +148,6 @@ function extractIssuerFromSDJWT(sdJwt: string): string {
 // ---------------------------------------------------------------------------
 
 export class VerificationService {
-
   // ─── POST /request ────────────────────────────────────────────────────────
 
   async createRequest(
@@ -164,7 +160,22 @@ export class VerificationService {
       nonce,
       callbackUrl,
       pageUrl,
+      pairingSecret,
     } = params;
+
+    // 0. Route to the End User this extension is paired with (SRS FR-003).
+    // An unpaired or revoked browser has no device to send the request to.
+    const userId = pairingSecret
+      ? await pairingService.resolvePairedUser(pairingSecret)
+      : null;
+
+    if (!userId) {
+      throw new VerificationError(
+        "This browser is not paired with a NexusID device. Pair it from the extension first.",
+        "NOT_PAIRED",
+        409,
+      );
+    }
 
     // 1. Replay-attack guard — nonce must never have been used.
     const usedNonce = await prisma.usedNonce.findUnique({
@@ -173,8 +184,8 @@ export class VerificationService {
 
     if (usedNonce) {
       throw new VerificationError(
-        'Nonce has already been consumed',
-        'NONCE_REPLAY',
+        "Nonce has already been consumed",
+        "NONCE_REPLAY",
         400,
       );
     }
@@ -184,15 +195,15 @@ export class VerificationService {
       where: {
         nonce,
         status: {
-          in: ['pending', 'completed'],
+          in: ["pending", "completed"],
         },
       },
     });
 
     if (liveRequest) {
       throw new VerificationError(
-        'A live request with this nonce already exists',
-        'NONCE_IN_USE',
+        "A live request with this nonce already exists",
+        "NONCE_IN_USE",
         400,
       );
     }
@@ -205,18 +216,20 @@ export class VerificationService {
       data: {
         id: requestId,
         verifierId,
+        userId,
         requestedFields,
         nonce,
         callbackUrl: callbackUrl ?? null,
         pageUrl,
-        status: 'pending',
+        status: "pending",
         expiresAt,
       },
     });
 
-    // 3. Collect all users with a registered push token.
+    // 3. Push only to the paired End User's device.
     const users = await prisma.user.findMany({
       where: {
+        id: userId,
         pushToken: {
           not: null,
         },
@@ -249,7 +262,7 @@ export class VerificationService {
         notification_sent = true;
       } catch (err) {
         console.error(
-          '[VerificationService.createRequest] FCM send failed:',
+          "[VerificationService.createRequest] FCM send failed:",
           err,
         );
       }
@@ -258,7 +271,7 @@ export class VerificationService {
     // 5. Audit log.
     await prisma.auditLog.create({
       data: {
-        eventType: 'verification_request_created',
+        eventType: "verification_request_created",
         requestId,
         verifierId,
         metadata: {
@@ -272,7 +285,7 @@ export class VerificationService {
 
     return {
       requestId,
-      status: 'queued',
+      status: "queued",
       notification_sent,
       expiresAt: expiresAt.toISOString(),
     };
@@ -280,73 +293,73 @@ export class VerificationService {
 
   // ─── GET /request/:id ─────────────────────────────────────────────────────
 
-  async pollRequest(requestId: string): Promise<PollResult> {
+  async pollRequest(
+    requestId: string,
+    verifierId: string,
+  ): Promise<PollResult> {
     const request = await prisma.verificationRequest.findUnique({
       where: { id: requestId },
     });
 
-    if (!request) {
+    // A verifier may only read its own requests. Another verifier's request
+    // is reported as not found so request IDs cannot be probed.
+    if (!request || request.verifierId !== verifierId) {
       throw new VerificationError(
-        'Verification request not found',
-        'NOT_FOUND',
+        "Verification request not found",
+        "NOT_FOUND",
         404,
       );
     }
 
     // Lazily expire stale pending requests on first poll.
-    if (
-      request.status === 'pending' &&
-      new Date() > request.expiresAt
-    ) {
+    if (request.status === "pending" && new Date() > request.expiresAt) {
       await prisma.verificationRequest.update({
         where: { id: requestId },
-        data: { status: 'expired' },
+        data: { status: "expired" },
       });
 
       return {
-        status: 'expired',
+        status: "expired",
       };
     }
 
     const status = request.status as VerificationStatus;
 
     switch (status) {
-      case 'pending':
+      case "pending":
         return {
-          status: 'pending',
+          status: "pending",
           expiresAt: request.expiresAt.toISOString(),
         };
 
-      case 'rejected':
+      case "rejected":
         return {
-          status: 'rejected',
+          status: "rejected",
           rejected_at: request.rejectedAt?.toISOString(),
         };
 
-      case 'expired':
+      case "expired":
         return {
-          status: 'expired',
+          status: "expired",
         };
 
-      case 'completed': {
-        const result =
-          await prisma.verificationResult.findUnique({
-            where: { requestId },
-          });
+      case "completed": {
+        const result = await prisma.verificationResult.findUnique({
+          where: { requestId },
+        });
 
         return {
-          status: 'completed',
+          status: "completed",
           verifiedFields:
             (result?.verifiedFields as Record<string, unknown>) ?? {},
-          callbackUrl:
-            request.callbackUrl ?? undefined,
+          callbackUrl: request.callbackUrl ?? undefined,
         };
       }
 
       default:
         throw new VerificationError(
           `Unexpected request status: ${status}`,
-          'INTERNAL_ERROR',
+          "INTERNAL_ERROR",
           500,
         );
     }
@@ -354,35 +367,30 @@ export class VerificationService {
 
   // ─── POST /submit-proof ───────────────────────────────────────────────────
 
-  async submitProof(
-    params: SubmitProofParams,
-  ): Promise<SubmitProofResult> {
-    const {
-      verification_requestId,
-      proof,
-      user_id,
-    } = params;
+  async submitProof(params: SubmitProofParams): Promise<SubmitProofResult> {
+    const { verification_requestId, proof, user_id } = params;
 
     // 1. Load and validate the request.
-    const request =
-      await prisma.verificationRequest.findUnique({
-        where: {
-          id: verification_requestId,
-        },
-      });
+    const request = await prisma.verificationRequest.findUnique({
+      where: {
+        id: verification_requestId,
+      },
+    });
 
-    if (!request) {
+    // Only the End User the request was routed to may answer it; anyone else
+    // gets the same 404 as for a missing request.
+    if (!request || (request.userId !== null && request.userId !== user_id)) {
       throw new VerificationError(
-        'Verification request not found',
-        'NOT_FOUND',
+        "Verification request not found",
+        "NOT_FOUND",
         404,
       );
     }
 
-    if (request.status !== 'pending') {
+    if (request.status !== "pending") {
       throw new VerificationError(
         `Request is not pending (status: ${request.status})`,
-        'INVALID_STATUS',
+        "INVALID_STATUS",
         400,
       );
     }
@@ -393,33 +401,30 @@ export class VerificationService {
           id: verification_requestId,
         },
         data: {
-          status: 'expired',
+          status: "expired",
         },
       });
 
       throw new VerificationError(
-        'Verification request has expired',
-        'REQUEST_EXPIRED',
+        "Verification request has expired",
+        "REQUEST_EXPIRED",
         400,
       );
     }
 
     // 2. Resolve issuer public key from the SD-JWT.
-    const issuerId = extractIssuerFromSDJWT(
-      proof.presentation.sd_jwt,
-    );
+    const issuerId = extractIssuerFromSDJWT(proof.presentation.sd_jwt);
 
-    const issuerRecord =
-      await prisma.issuerRegistry.findUnique({
-        where: {
-          issuerId,
-        },
-      });
+    const issuerRecord = await prisma.issuerRegistry.findUnique({
+      where: {
+        issuerId,
+      },
+    });
 
     if (!issuerRecord || !issuerRecord.active) {
       throw new VerificationError(
         `Issuer '${issuerId}' is not in the trusted registry or is inactive`,
-        'UNTRUSTED_ISSUER',
+        "UNTRUSTED_ISSUER",
         400,
       );
     }
@@ -435,17 +440,13 @@ export class VerificationService {
     });
 
     if (!userRecord) {
-      throw new VerificationError(
-        'User not found',
-        'USER_NOT_FOUND',
-        404,
-      );
+      throw new VerificationError("User not found", "USER_NOT_FOUND", 404);
     }
 
     if (!userRecord.publicKey) {
       throw new VerificationError(
-        'User has no registered public key — cannot verify proof',
-        'MISSING_PUBLIC_KEY',
+        "User has no registered public key — cannot verify proof",
+        "MISSING_PUBLIC_KEY",
         400,
       );
     }
@@ -455,35 +456,60 @@ export class VerificationService {
       issuerPublicKey: issuerRecord.publicKey,
       userPublicKey: userRecord.publicKey,
       expectedNonce: request.nonce,
-      verifierId: request.verifierId ?? '',
+      verifierId: request.verifierId ?? "",
     });
 
     if (!verifyResult.valid) {
       // Record failed verification for audit/fraud analysis.
       await prisma.auditLog.create({
         data: {
-          eventType: 'proof_verification_failed',
+          eventType: "proof_verification_failed",
           requestId: verification_requestId,
           verifierId: request.verifierId,
           metadata: {
-            error: verifyResult.error ?? 'unknown',
+            error: verifyResult.error ?? "unknown",
             user_id,
           },
         },
       });
 
       throw new VerificationError(
-        verifyResult.error ?? 'Proof verification failed',
-        'PROOF_INVALID',
+        verifyResult.error ?? "Proof verification failed",
+        "PROOF_INVALID",
         400,
       );
     }
 
+    // 4b. Revocation (BR-006). Postgres is the source of truth: a credential
+    // the user revoked must not be usable, whatever the holder still stores.
+    // Credentials the backend never recorded (no row) pass — same fail-open
+    // stance as the blockchain cross-check.
+    const credentialJti = sdJwtCredentialId(proof.presentation.sd_jwt);
+    if (credentialJti) {
+      const record = await prisma.credential.findUnique({
+        where: { credentialJti },
+        select: { status: true },
+      });
+      if (record?.status === "revoked") {
+        await prisma.auditLog.create({
+          data: {
+            eventType: "proof_rejected_revoked",
+            requestId: verification_requestId,
+            verifierId: request.verifierId,
+            metadata: { user_id, credential_jti: credentialJti },
+          },
+        });
+        throw new VerificationError(
+          "This credential has been revoked and cannot be used",
+          "CREDENTIAL_REVOKED",
+          400,
+        );
+      }
+    }
+
     // 5. Commit result atomically.
     const verifiedAt = new Date();
-    const proofHash = sha256Hex(
-      JSON.stringify(proof),
-    );
+    const proofHash = sha256Hex(JSON.stringify(proof));
 
     await prisma.$transaction([
       // Store verified fields.
@@ -491,8 +517,7 @@ export class VerificationService {
         data: {
           id: uuidv4(),
           requestId: verification_requestId,
-          verifiedFields:
-            verifyResult.verifiedFields as object,
+          verifiedFields: verifyResult.verifiedFields as object,
           issuer: verifyResult.issuer,
           proofHash,
           verifiedAt,
@@ -505,7 +530,7 @@ export class VerificationService {
           id: verification_requestId,
         },
         data: {
-          status: 'completed',
+          status: "completed",
           completedAt: verifiedAt,
         },
       }),
@@ -521,24 +546,21 @@ export class VerificationService {
       // Audit trail.
       prisma.auditLog.create({
         data: {
-          eventType: 'proof_verified',
+          eventType: "proof_verified",
           requestId: verification_requestId,
           verifierId: request.verifierId,
           metadata: {
             user_id,
             issuer: verifyResult.issuer,
             proofHash,
-            fields_disclosed:
-              Object.keys(
-                verifyResult.verifiedFields,
-              ),
+            fields_disclosed: Object.keys(verifyResult.verifiedFields),
           },
         },
       }),
     ]);
 
     return {
-      status: 'verified',
+      status: "verified",
       verifiedFields: verifyResult.verifiedFields,
       issuer: verifyResult.issuer,
       verifiedAt: verifiedAt.toISOString(),
@@ -550,26 +572,27 @@ export class VerificationService {
   async rejectRequest(
     requestId: string,
     user_id: string,
-  ): Promise<{ status: 'rejected' }> {
-    const request =
-      await prisma.verificationRequest.findUnique({
-        where: {
-          id: requestId,
-        },
-      });
+  ): Promise<{ status: "rejected" }> {
+    const request = await prisma.verificationRequest.findUnique({
+      where: {
+        id: requestId,
+      },
+    });
 
-    if (!request) {
+    // Only the End User the request was routed to may answer it; anyone else
+    // gets the same 404 as for a missing request.
+    if (!request || (request.userId !== null && request.userId !== user_id)) {
       throw new VerificationError(
-        'Verification request not found',
-        'NOT_FOUND',
+        "Verification request not found",
+        "NOT_FOUND",
         404,
       );
     }
 
-    if (request.status !== 'pending') {
+    if (request.status !== "pending") {
       throw new VerificationError(
         `Cannot reject a request with status '${request.status}'`,
-        'INVALID_STATUS',
+        "INVALID_STATUS",
         409,
       );
     }
@@ -582,14 +605,14 @@ export class VerificationService {
           id: requestId,
         },
         data: {
-          status: 'rejected',
+          status: "rejected",
           rejectedAt,
         },
       }),
 
       prisma.auditLog.create({
         data: {
-          eventType: 'verification_rejected',
+          eventType: "verification_rejected",
           requestId,
           verifierId: request.verifierId,
           metadata: {
@@ -601,8 +624,38 @@ export class VerificationService {
     ]);
 
     return {
-      status: 'rejected',
+      status: "rejected",
     };
+  }
+
+  // ─── GET /pending ─────────────────────────────────────────────────────────
+
+  /**
+   * Requests routed to this End User (via pairing) that still await a
+   * decision (SRS UC-004). Expired requests are excluded.
+   */
+  async getPendingForUser(user_id: string): Promise<PendingRequest[]> {
+    const rows = await prisma.verificationRequest.findMany({
+      where: {
+        userId: user_id,
+        status: "pending",
+        expiresAt: { gt: new Date() },
+      },
+      include: { verifier: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return rows.map((r) => ({
+      requestId: r.id,
+      verifierId: r.verifierId ?? "",
+      verifierName: r.verifier?.displayName ?? "Unknown verifier",
+      verifierDomain: r.verifier?.domain ?? null,
+      requestedFields: r.requestedFields,
+      nonce: r.nonce,
+      pageUrl: r.pageUrl,
+      createdAt: r.createdAt.toISOString(),
+      expiresAt: r.expiresAt.toISOString(),
+    }));
   }
 
   // ─── GET /history ─────────────────────────────────────────────────────────
@@ -618,81 +671,60 @@ export class VerificationService {
     const actedLogs = await prisma.auditLog.findMany({
       where: {
         eventType: {
-          in: [
-            'proof_verified',
-            'verification_rejected',
-          ],
+          in: ["proof_verified", "verification_rejected"],
         },
         metadata: {
-          path: ['user_id'],
+          path: ["user_id"],
           equals: user_id,
         },
       },
       select: {
         requestId: true,
       },
-      distinct: ['requestId'],
+      distinct: ["requestId"],
     });
 
     const requestIds = actedLogs
       .map((log) => log.requestId)
-      .filter(
-        (id): id is string => id !== null,
-      );
+      .filter((id): id is string => id !== null);
 
-    if (requestIds.length === 0) {
-      return {
-        data: [],
-        total: 0,
-        page,
-        limit,
-      };
-    }
+    // Requests routed to this user via pairing (incl. expired ones), plus any
+    // they acted on before routing existed. Pending requests live on /pending.
+    const where = {
+      OR: [{ userId: user_id }, { id: { in: requestIds } }],
+      status: { not: "pending" },
+    };
 
-    const [total, requests] =
-      await Promise.all([
-        prisma.verificationRequest.count({
-          where: {
-            id: {
-              in: requestIds,
-            },
-          },
-        }),
+    const [total, requests] = await Promise.all([
+      prisma.verificationRequest.count({ where }),
 
-        prisma.verificationRequest.findMany({
-          where: {
-            id: {
-              in: requestIds,
-            },
-          },
-          include: {
-            result: true,
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-          skip,
-          take: limit,
-        }),
-      ]);
+      prisma.verificationRequest.findMany({
+        where,
+        include: {
+          result: true,
+          verifier: { select: { displayName: true } },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip,
+        take: limit,
+      }),
+    ]);
 
-    const data: HistoryRecord[] =
-      requests.map((r) => ({
-        requestId: r.id,
-        verifierId: r.verifierId ?? '',
-        verifiedFields: r.result
-          ? (r.result.verifiedFields as Record<
-              string,
-              unknown
-            >)
-          : null,
-        verifiedAt:
-          r.result?.verifiedAt.toISOString() ?? null,
-        status:
-          r.status as VerificationStatus,
-        created_at:
-          r.createdAt.toISOString(),
-      }));
+    const data: HistoryRecord[] = requests.map((r) => ({
+      requestId: r.id,
+      verifierId: r.verifierId ?? "",
+      verifierName: r.verifier?.displayName ?? "Unknown verifier",
+      requestedFields: r.requestedFields,
+      decidedAt: (r.completedAt ?? r.rejectedAt)?.toISOString() ?? null,
+      verifiedFields: r.result
+        ? (r.result.verifiedFields as Record<string, unknown>)
+        : null,
+      verifiedAt: r.result?.verifiedAt.toISOString() ?? null,
+      status: r.status as VerificationStatus,
+      created_at: r.createdAt.toISOString(),
+    }));
 
     return {
       data,
@@ -703,5 +735,4 @@ export class VerificationService {
   }
 }
 
-export const verificationService =
-  new VerificationService();
+export const verificationService = new VerificationService();

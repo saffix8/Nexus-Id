@@ -77,6 +77,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'START_PAIRING') {
+    // Popup asks for a fresh pairing QR code (UC-002 step 1)
+    startPairing()
+      .then(result => sendResponse({ success: true, data: result }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'CHECK_PAIRING') {
+    // Popup polls while the QR is on screen (UC-002 step 5)
+    checkPairing()
+      .then(result => sendResponse({ success: true, data: result }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'FORGET_PAIRING') {
+    chrome.storage.local.remove(PAIRING_STORAGE_KEY)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // Unrecognised message type — respond immediately
   sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
   return false;
@@ -104,11 +127,23 @@ async function handleVerificationRequest(request, tabId) {
     nonce,
     callback_url,
     page_url,
+    api_key,
   } = request;
 
-  // Validate required fields before hitting the backend
-  if (!verifier_id || !requested_fields || !nonce) {
-    throw new Error('Missing required fields: verifier_id, requested_fields, nonce');
+  // Validate required fields before hitting the backend.
+  // api_key is the Service Provider's key (SRS FR-034); the backend derives the
+  // verifier identity from it — verifier_id here is only used for display.
+  if (!api_key || !requested_fields || !nonce || !page_url) {
+    throw new Error('Missing required fields: api_key, requested_fields, nonce, page_url');
+  }
+
+  // SRS FR-003: requests are routed to the phone this browser is paired with.
+  const pairing = await getPairing();
+  if (!pairing || pairing.status !== 'paired') {
+    throw new Error(
+      'This browser is not paired with your NexusID app yet. ' +
+      'Open the NexusID extension and scan its QR code with your phone.'
+    );
   }
 
   // Generate a local correlation ID so we can track this in storage
@@ -116,44 +151,73 @@ async function handleVerificationRequest(request, tabId) {
 
   console.log(`[NexusID] New verification request ${request_id} from ${verifier_id}`);
 
-  // POST to backend — may return a different server-assigned ID, but we track
-  // by our local request_id in storage; the backend uses nonce for dedup
+  // POST to backend. We track by our local request_id in storage and poll the
+  // backend by the requestId it returns.
   let backendRequestId;
+  let response;
   try {
+    // Shape must match CreateRequestSchema in
+    // services/backend/src/routes/verification.route.ts (camelCase).
     const body = {
-      verifier_id,
-      verifier_name: verifier_name || verifier_id,
-      requested_fields: Array.isArray(requested_fields) ? requested_fields : [requested_fields],
+      requestedFields: Array.isArray(requested_fields) ? requested_fields : [requested_fields],
       nonce,
-      callback_url: callback_url || null,
-      page_url: page_url || null,
+      pageUrl: page_url,
     };
+    // callbackUrl is optional on the backend — omit it rather than send null.
+    if (callback_url) body.callbackUrl = callback_url;
 
-    const response = await fetchWithTimeout(
+    response = await fetchWithTimeout(
       `${BACKEND_URL}/verification/request`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': api_key,
+          'x-pairing-secret': pairing.secret,
+        },
         body: JSON.stringify(body),
       },
       10000 // 10 second timeout for the initial request
     );
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Backend returned ${response.status}: ${errText}`);
-    }
-
-    const data = await response.json();
-
-    // Backend may return its own request_id — use that for polling
-    backendRequestId = data.data?.request_id || data.request_id || request_id;
-
-    console.log(`[NexusID] Backend acknowledged request. Polling id: ${backendRequestId}`);
   } catch (err) {
+    // Network failure / timeout — the backend was never reached.
     console.error('[NexusID] Failed to POST verification request to backend:', err);
     throw new Error(`Could not reach NexusID backend: ${err.message}`);
   }
+
+  // The backend answered — surface its error message as-is.
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    // Non-JSON body — handled below.
+  }
+
+  if (!response.ok) {
+    const detail = (data && data.error) || `HTTP ${response.status}`;
+    console.error('[NexusID] Backend rejected verification request:', response.status, detail);
+    if (response.status === 401) {
+      throw new Error(`This site's NexusID API key was rejected (${detail}).`);
+    }
+    if (response.status === 409 && /not paired/i.test(detail)) {
+      // Pairing was revoked from the phone/dashboard — forget it locally.
+      await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
+      throw new Error(
+        'This browser is no longer paired with your NexusID app. ' +
+        'Open the NexusID extension to pair again.'
+      );
+    }
+    throw new Error(`NexusID could not start verification: ${detail}`);
+  }
+
+  // Backend responds with ApiResponse<{ requestId, status, expiresAt, ... }>.
+  backendRequestId = data && data.data && data.data.requestId;
+  if (!backendRequestId) {
+    throw new Error('NexusID backend response did not include a requestId');
+  }
+
+  console.log(`[NexusID] Backend acknowledged request. Polling id: ${backendRequestId}`);
 
   // Persist to chrome.storage.local so the popup and recovery logic can read it
   const entry = {
@@ -166,6 +230,9 @@ async function handleVerificationRequest(request, tabId) {
     nonce,
     callback_url:      callback_url || null,
     page_url:          page_url || null,
+    // Needed to resume polling after the service worker restarts. The key is
+    // already public in the page's HTML snippet, so storing it adds no exposure.
+    api_key,
     status:            'pending',
     poll_attempts:     0,
     created_at:        Date.now(),
@@ -175,9 +242,121 @@ async function handleVerificationRequest(request, tabId) {
   await setStorageEntry(request_id, entry);
 
   // Begin polling — non-blocking; runs via setInterval inside the service worker
-  startPolling(request_id, backendRequestId, tabId);
+  startPolling(request_id, backendRequestId, tabId, api_key);
 
   return { request_id };
+}
+
+// ─── DEVICE PAIRING (SRS UC-002, FR-003, FR-024) ─────────────────────────────
+
+/**
+ * chrome.storage.local record:
+ *   { pairing_id, secret, status: 'pending'|'paired', expires_at, paired_at,
+ *     qr_payload }   — qr_payload is dropped once paired.
+ * The secret is this browser's credential for its pairing; the backend stores
+ * only its hash.
+ */
+const PAIRING_STORAGE_KEY = 'nexusid_pairing';
+
+async function getPairing() {
+  const result = await chrome.storage.local.get(PAIRING_STORAGE_KEY);
+  return result[PAIRING_STORAGE_KEY] || null;
+}
+
+/**
+ * Creates a new pairing session and returns what the popup needs to draw the
+ * QR code. Replaces any previous pending (unclaimed) session.
+ */
+async function startPairing() {
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      `${BACKEND_URL}/pairing/sessions`,
+      { method: 'POST' },
+      10000
+    );
+  } catch (err) {
+    throw new Error(`Could not reach NexusID backend: ${err.message}`);
+  }
+
+  const json = await response.json().catch(() => null);
+  if (!response.ok || !json || !json.data) {
+    throw new Error((json && json.error) || `Pairing failed (HTTP ${response.status})`);
+  }
+
+  const { pairingId, secret, expiresAt, qrPayload } = json.data;
+  const record = {
+    pairing_id: pairingId,
+    secret,
+    status:     'pending',
+    expires_at: expiresAt,
+    paired_at:  null,
+    qr_payload: qrPayload,
+  };
+  await chrome.storage.local.set({ [PAIRING_STORAGE_KEY]: record });
+
+  return { status: 'pending', qr_payload: qrPayload, expires_at: expiresAt };
+}
+
+/**
+ * Returns the current pairing state, asking the backend when a QR code is
+ * still waiting to be scanned. Never exposes the secret to the popup.
+ *
+ * @returns {Promise<{status: 'unpaired'|'pending'|'paired'|'expired', qr_payload?: string, expires_at?: string, paired_at?: string}>}
+ */
+async function checkPairing() {
+  const pairing = await getPairing();
+  if (!pairing) return { status: 'unpaired' };
+
+  if (pairing.status === 'paired') {
+    return { status: 'paired', paired_at: pairing.paired_at };
+  }
+
+  // Pending — ask the backend whether the phone has claimed it yet.
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      `${BACKEND_URL}/pairing/sessions/${pairing.pairing_id}`,
+      { method: 'GET', headers: { 'x-pairing-secret': pairing.secret } },
+      8000
+    );
+  } catch (err) {
+    // Transient — report the local state and let the popup retry.
+    return { status: 'pending', qr_payload: pairing.qr_payload, expires_at: pairing.expires_at };
+  }
+
+  if (response.status === 404) {
+    await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
+    return { status: 'unpaired' };
+  }
+
+  const json = await response.json().catch(() => null);
+  const state = json && json.data;
+  if (!response.ok || !state) {
+    return { status: 'pending', qr_payload: pairing.qr_payload, expires_at: pairing.expires_at };
+  }
+
+  if (state.status === 'paired') {
+    await chrome.storage.local.set({
+      [PAIRING_STORAGE_KEY]: {
+        pairing_id: pairing.pairing_id,
+        secret:     pairing.secret,
+        status:     'paired',
+        expires_at: pairing.expires_at,
+        paired_at:  state.pairedAt,
+      },
+    });
+    showBrowserNotification('Device paired', 'This browser is now linked to your NexusID app.');
+    return { status: 'paired', paired_at: state.pairedAt };
+  }
+
+  if (state.status === 'expired' || state.status === 'revoked') {
+    // BR-002 / 1.E1 — the code can no longer be used.
+    await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
+    return { status: 'expired' };
+  }
+
+  return { status: 'pending', qr_payload: pairing.qr_payload, expires_at: pairing.expires_at };
 }
 
 // ─── POLLING ──────────────────────────────────────────────────────────────────
@@ -194,8 +373,9 @@ async function handleVerificationRequest(request, tabId) {
  * @param {string} localId     - Our local tracking ID (chrome.storage key)
  * @param {string} backendId   - The ID the backend uses for this request
  * @param {number|null} tabId  - Tab to notify on completion
+ * @param {string} apiKey      - Service Provider API key (x-api-key header)
  */
-function startPolling(localId, backendId, tabId) {
+function startPolling(localId, backendId, tabId, apiKey) {
   console.log(`[NexusID] Starting polling for request ${backendId} (local: ${localId})`);
 
   // Store the interval ID in a module-level map so we can cancel it
@@ -226,11 +406,24 @@ function startPolling(localId, backendId, tabId) {
     try {
       const response = await fetchWithTimeout(
         `${BACKEND_URL}/verification/request/${backendId}`,
-        { method: 'GET' },
+        { method: 'GET', headers: { 'x-api-key': apiKey } },
         8000
       );
 
       if (!response.ok) {
+        // 401 means the API key is missing or invalid — retrying cannot help.
+        if (response.status === 401) {
+          console.warn(`[NexusID] Poll for ${backendId} rejected: invalid API key. Stopping poll.`);
+          clearInterval(intervalId);
+          activePolls.delete(localId);
+          await updateStorageEntry(localId, { status: 'expired', updated_at: Date.now() });
+          await notifyTab(tabId, {
+            type:       'VERIFICATION_ERROR',
+            request_id: localId,
+            error:      'This site\'s NexusID API key was rejected.',
+          });
+          return;
+        }
         // 404 means the request was never found on the backend — treat as expired
         if (response.status === 404) {
           console.warn(`[NexusID] Request ${backendId} not found on backend (404). Stopping poll.`);
@@ -259,19 +452,25 @@ function startPolling(localId, backendId, tabId) {
       clearInterval(intervalId);
       activePolls.delete(localId);
 
+      // Backend PollResult uses camelCase: { status, verifiedFields, callbackUrl }
+      const verifiedFields = data.verifiedFields || {};
+      const callbackUrl    = data.callbackUrl || null;
+
       // Update storage
       await updateStorageEntry(localId, {
-        status:       'completed',
-        verified_fields: data.verified_fields || {},
-        callback_url:    data.callback_url || null,
-        updated_at:   Date.now(),
+        status:          'completed',
+        verified_fields: verifiedFields,
+        callback_url:    callbackUrl,
+        updated_at:      Date.now(),
       });
 
       // Notify the tab
       await notifyTab(tabId, {
         type:            'VERIFICATION_COMPLETE',
-        verified_fields: data.verified_fields || {},
-        callback_url:    data.callback_url || null,
+        request_id:      localId,
+        backend_request_id: backendId,
+        verified_fields: verifiedFields,
+        callback_url:    callbackUrl,
       });
 
       // Browser notification
@@ -327,7 +526,13 @@ async function handleTerminalState(localId, tabId, state) {
   const messageType =
     state === 'rejected' ? 'VERIFICATION_REJECTED' : 'VERIFICATION_EXPIRED';
 
-  await notifyTab(tabId, { type: messageType });
+  // backend_request_id lets the site's server confirm the outcome (FR-017).
+  const entry = await getStorageEntry(localId);
+  await notifyTab(tabId, {
+    type:               messageType,
+    request_id:         localId,
+    backend_request_id: entry ? entry.backend_id : null,
+  });
 
   if (state === 'rejected') {
     showBrowserNotification('Verification Rejected', 'The verification request was rejected.');
@@ -358,7 +563,7 @@ async function cancelVerification(requestId, tabId) {
   const entry = await getStorageEntry(requestId);
   const targetTabId = tabId || (entry && entry.tab_id) || null;
 
-  await notifyTab(targetTabId, { type: 'VERIFICATION_EXPIRED' });
+  await notifyTab(targetTabId, { type: 'VERIFICATION_EXPIRED', request_id: requestId });
 
   console.log(`[NexusID] Verification ${requestId} cancelled by user.`);
 }
@@ -534,11 +739,11 @@ async function recoverOrphanedRequests() {
       if (remainingAttempts <= 0) {
         // Already timed out — mark as expired
         await updateStorageEntry(key, { status: 'expired', updated_at: now });
-        await notifyTab(entry.tab_id, { type: 'VERIFICATION_EXPIRED' });
+        await notifyTab(entry.tab_id, { type: 'VERIFICATION_EXPIRED', request_id: key });
       } else {
         // Resume polling with reduced attempt budget
         activePolls.set(key, { attempts: elapsedAttempts });
-        startPolling(key, entry.backend_id, entry.tab_id);
+        startPolling(key, entry.backend_id, entry.tab_id, entry.api_key);
       }
     } else {
       // Beyond TTL — mark as expired

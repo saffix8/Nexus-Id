@@ -13,9 +13,40 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+// SRS FR-029 — role selection at login.
+type Role = 'user' | 'provider';
+
+const ROLE_COPY: Record<Role, { subtitle: string; action: string; home: string; signupHref: string; signupText: string }> = {
+  user: {
+    subtitle: 'Sign in to your identity wallet',
+    action: 'login',
+    home: '/dashboard',
+    signupHref: '/auth/register',
+    signupText: 'Create one',
+  },
+  provider: {
+    subtitle: 'Sign in to the Service Provider portal',
+    action: 'verifier-login',
+    home: '/verifier/dashboard',
+    signupHref: '/auth/provider-register',
+    signupText: 'Register your organisation',
+  },
+};
+
+/** Only same-site paths are allowed as a post-login destination. */
+function safeNext(next: string | string[] | undefined): string | null {
+  return typeof next === 'string' && next.startsWith('/') && !next.startsWith('//') ? next : null;
+}
+
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams: { role?: string | string[]; next?: string | string[] };
+}) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>(searchParams.role === 'provider' ? 'provider' : 'user');
+  const copy = ROLE_COPY[role];
 
   const {
     register,
@@ -37,7 +68,7 @@ export default function LoginPage() {
     }
 
     try {
-      const res = await fetch('/api/auth?action=login', {
+      const res = await fetch(`/api/auth?action=${copy.action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(parsed.data),
@@ -50,7 +81,10 @@ export default function LoginPage() {
         return;
       }
 
-      router.push('/dashboard');
+      const next = safeNext(searchParams.next);
+      // Only honour `next` when it belongs to the portal just signed into.
+      const portalPrefix = role === 'provider' ? '/verifier' : '/dashboard';
+      router.push(next && next.startsWith(portalPrefix) ? next : copy.home);
       router.refresh();
     } catch {
       setServerError('Unable to reach the server. Please try again.');
@@ -78,8 +112,25 @@ export default function LoginPage() {
               Welcome back
             </h1>
             <p className="text-sm text-[#8B92A8]">
-              Sign in to your identity wallet
+              {copy.subtitle}
             </p>
+          </div>
+
+          <div role="tablist" aria-label="Sign in as" className="grid grid-cols-2 gap-1 p-1 mb-6 rounded-lg bg-[#0A0C10] border border-[#1E2330]">
+            {(['user', 'provider'] as const).map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="tab"
+                aria-selected={role === r}
+                onClick={() => { setRole(r); setServerError(null); }}
+                className={`py-2 rounded-md text-sm font-medium transition-colors ${
+                  role === r ? 'bg-[#1A1E28] text-[#EEF0F6]' : 'text-[#525A72] hover:text-[#8B92A8]'
+                }`}
+              >
+                {r === 'user' ? 'End User' : 'Service Provider'}
+              </button>
+            ))}
           </div>
 
           {serverError && (
@@ -156,8 +207,8 @@ export default function LoginPage() {
 
           <p className="text-center text-sm text-[#8B92A8]">
             Don&apos;t have an account?{' '}
-            <Link href="/auth/register" className="text-[#3B6FE8] hover:text-[#4A7EF7] font-medium transition-colors">
-              Create one
+            <Link href={copy.signupHref} className="text-[#3B6FE8] hover:text-[#4A7EF7] font-medium transition-colors">
+              {copy.signupText}
             </Link>
           </p>
         </div>

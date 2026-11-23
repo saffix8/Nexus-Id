@@ -1,9 +1,6 @@
-const dotenv = require('dotenv');
+const { useTestDatabase } = require("./jest.test-db.cjs");
 
-dotenv.config({ path: 'services/backend/.env' });
-dotenv.config({ path: '.env' });
+// Loads env files and redirects DATABASE_URL to the isolated test database.
+useTestDatabase();
 
-console.log(
-  '[JEST ENV] DATABASE_URL:',
-  process.env.DATABASE_URL ? 'LOADED' : 'MISSING',
-);
+console.log("[JEST ENV] DATABASE_URL: test database");

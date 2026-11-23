@@ -15,8 +15,10 @@ import type {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BASE_URL =
-  (process.env.API_URL ?? 'http://10.0.2.2:4000/api/v1').replace(/\/$/, '');
+const BASE_URL = (process.env.API_URL ?? 'http://10.0.2.2:4000/api/v1').replace(
+  /\/$/,
+  '',
+);
 
 const TOKEN_STORAGE_KEY = '@nexusid/jwt_token';
 
@@ -119,7 +121,7 @@ class ApiService {
 
     // Response interceptor — handle 401
     this.client.interceptors.response.use(
-      (response) => response,
+      response => response,
       async (error: AxiosError) => {
         if (error.response?.status === 401) {
           await this.clearToken();
@@ -155,8 +157,7 @@ class ApiService {
 
       if (axiosErr.response) {
         const status = axiosErr.response.status;
-        const serverError =
-          axiosErr.response.data?.error ?? axiosErr.message;
+        const serverError = axiosErr.response.data?.error ?? axiosErr.message;
         throw new ApiError(serverError, status);
       }
 
@@ -235,7 +236,8 @@ class ApiService {
     return this.request<VerificationResult>({
       method: 'POST',
       url: '/verification/submit-proof',
-      data: { verification_request_id, proof },
+      // Backend SubmitProofSchema field name (verification.route.ts).
+      data: { verification_requestId: verification_request_id, proof },
     });
   }
 
@@ -253,6 +255,24 @@ class ApiService {
     });
   }
 
+  // ── Device pairing (SRS UC-002, FR-003) ───────────────────────────────────
+
+  /**
+   * Claims a browser-extension pairing code scanned from its QR, linking that
+   * browser to the signed-in End User. Throws ApiError with the server message
+   * on an invalid (400), already-used (409) or expired (410) code.
+   */
+  async claimPairing(
+    pairingId: string,
+    code: string,
+  ): Promise<PairingClaimResult> {
+    return this.request<PairingClaimResult>({
+      method: 'POST',
+      url: '/pairing/claim',
+      data: { pairingId, code },
+    });
+  }
+
   // ── Issuers ───────────────────────────────────────────────────────────────
 
   async getIssuerPublicKey(issuerId: string): Promise<string> {
@@ -263,6 +283,13 @@ class ApiService {
 
     return data.public_key;
   }
+}
+
+export interface PairingClaimResult {
+  pairingId: string;
+  status: 'paired';
+  expiresAt: string;
+  pairedAt: string | null;
 }
 
 // ─── Singleton Export ─────────────────────────────────────────────────────────

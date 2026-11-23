@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { AUTH_COOKIE, AUTH_COOKIE_OPTIONS } from '@/lib/auth';
+import { AUTH_COOKIE, AUTH_COOKIE_OPTIONS, VERIFIER_COOKIE } from '@/lib/auth';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
 
@@ -77,6 +77,49 @@ function handleLogout(): NextResponse {
   return response;
 }
 
+// ─── Service Provider portal (SRS FR-029, FR-033) ─────────────────────────────
+// Separate cookie so a provider session never mixes with an End User session.
+
+async function handleVerifierAuth(
+  path: 'login' | 'register',
+  body: unknown,
+): Promise<NextResponse> {
+  const res = await fetch(`${BACKEND_URL}/verifiers/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok || !data.success) {
+    return errorResponse(
+      data.error ?? (path === 'login' ? 'Invalid email or password' : 'Registration failed'),
+      res.status,
+    );
+  }
+
+  const token: string | undefined = data.data?.token;
+  if (!token) {
+    return errorResponse('No token returned from server', 500);
+  }
+
+  // On register the backend returns the first API key — shown to the
+  // provider once, never stored by the web app.
+  const response = NextResponse.json({
+    success: true,
+    ...(path === 'register' ? { apiKey: data.data.apiKey as string } : {}),
+  });
+  response.cookies.set(VERIFIER_COOKIE, token, AUTH_COOKIE_OPTIONS);
+  return response;
+}
+
+function handleVerifierLogout(): NextResponse {
+  const response = NextResponse.json({ success: true });
+  response.cookies.set(VERIFIER_COOKIE, '', { ...AUTH_COOKIE_OPTIONS, maxAge: 0 });
+  return response;
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -85,6 +128,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (action === 'logout') {
     return handleLogout();
+  }
+
+  if (action === 'verifier-logout') {
+    return handleVerifierLogout();
   }
 
   let body: unknown;
@@ -101,6 +148,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       case 'register':
         return await handleRegister(body);
+
+      case 'verifier-login':
+        return await handleVerifierAuth('login', body);
+
+      case 'verifier-register':
+        return await handleVerifierAuth('register', body);
 
 
       default:

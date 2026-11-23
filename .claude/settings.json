@@ -1,0 +1,87 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test *)",
+      "Bash(npm run *)",
+      "Bash(npm ls *)",
+      "Bash(npx tsc *)",
+      "Bash(npx prisma generate *)",
+      "Bash(npx prisma migrate status *)",
+      "Bash(npx jest *)",
+      "Bash(node -e *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(docker ps *)",
+      "Bash(docker compose -f infra/docker-compose.yml ps *)",
+      "Bash(docker compose -f infra/docker-compose.yml logs *)",
+      "Bash(lsof *)",
+      "Bash(curl http://localhost:*)",
+      "Bash(gh issue *)",
+      "Bash(gh pr view *)",
+      "WebFetch(domain:datatracker.ietf.org)",
+      "WebFetch(domain:www.prisma.io)",
+      "WebFetch(domain:nextjs.org)",
+      "WebFetch(domain:hyperledger-fabric.readthedocs.io)"
+    ],
+    "deny": [
+      "Bash(npx prisma migrate reset *)",
+      "Bash(prisma migrate reset *)",
+      "Bash(npx prisma db push *)",
+      "Bash(rm -rf *)",
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(docker system prune *)",
+      "Bash(docker volume rm *)",
+      "Read(./.env)",
+      "Read(./**/.env*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.jwk)",
+      "Read(./**/*.keystore)"
+    ],
+    "ask": [
+      "Bash(docker compose * down *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/scripts/protect-paths.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | xargs -r npx prettier --write --ignore-unknown 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"Branch: $(git branch --show-current) | Last commit: $(git log -1 --pretty='%h %s') | Uncommitted: $(git status --porcelain | wc -l) files\""
+          }
+        ]
+      }
+    ]
+  }
+}

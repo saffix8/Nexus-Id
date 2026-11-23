@@ -61,11 +61,23 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch('/api/v1/verification/history', { credentials: 'include' });
+        const [res, credRes] = await Promise.all([
+          fetch('/api/v1/verification/history', { credentials: 'include' }),
+          fetch('/api/v1/credentials', { credentials: 'include' }),
+        ]);
         const json = await res.json();
+        const credJson = (await credRes.json()) as {
+          success: boolean;
+          data?: { status: string; expiresAt: string }[];
+        };
+        const creds = credJson.success && credJson.data ? credJson.data : [];
+        const activeCreds = creds.filter((c) => c.status === 'active');
+        const soon = Date.now() + 30 * 86_400_000;
+        const credentialCount = activeCreds.length;
+        const expiringCount = activeCreds.filter((c) => new Date(c.expiresAt).getTime() < soon).length;
 
         if (json.success) {
-          const history = json.data as { requestId: string; verifierId: string; status: string; created_at: string }[];
+          const history = json.data as { requestId: string; verifierId: string; verifierName: string; status: string; created_at: string }[];
           const now = new Date();
           const thisMonthCount = history.filter((h) => {
             const d = new Date(h.created_at);
@@ -73,13 +85,13 @@ export default function DashboardPage() {
           }).length;
 
           setData({
-            credentialCount: 0, // wired up once a credentials-list endpoint exists
+            credentialCount,
             verificationsThisMonth: thisMonthCount,
             lastVerifiedAt: history[0]?.created_at ?? null,
-            expiringCount: 0,
+            expiringCount,
             recentActivity: history.slice(0, 5).map((h) => ({
               id: h.requestId,
-              verifierId: h.verifierId,
+              verifierId: h.verifierName,
               status: h.status,
               createdAt: h.created_at,
             })),

@@ -1,58 +1,88 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { jwtVerify } from 'jose';
+import { type NextRequest, NextResponse } from "next/server";
+import { jwtVerify } from "jose";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+// Edge runtime: keep in sync with lib/auth.ts (AUTH_COOKIE / VERIFIER_COOKIE).
 
-const AUTH_COOKIE = 'nexusid_token';
-const LOGIN_PATH = '/auth/login';
+const AUTH_COOKIE = "nexusid_token"; // End User session
+const VERIFIER_COOKIE = "nexusid_verifier_token"; // Service Provider session (FR-033)
+const VERIFIER_ROLE = "verifier";
+const LOGIN_PATH = "/auth/login";
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? 'fallback-dev-secret-change-in-production'
+  process.env.JWT_SECRET ?? "fallback-dev-secret-change-in-production",
 );
 
-// ─── Protected route patterns ─────────────────────────────────────────────────
-
-const PROTECTED_PREFIXES = ['/dashboard', '/verifier'];
-const AUTH_ONLY_PATHS = ['/auth/login', '/auth/register']; // redirect away if already logged in
-
-function isProtected(pathname: string): boolean {
-  return PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-}
-
-function isAuthPage(pathname: string): boolean {
-  return AUTH_ONLY_PATHS.some((p) => pathname.startsWith(p));
-}
+const AUTH_ONLY_PATHS = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/provider-register",
+];
 
 // ─── Token validation ─────────────────────────────────────────────────────────
 
-async function isValidToken(token: string): Promise<boolean> {
+type Role = "user" | "verifier";
+
+/** True when the token is valid AND belongs to the expected portal. */
+async function hasValidSession(
+  token: string | undefined,
+  role: Role,
+): Promise<boolean> {
+  if (!token) return false;
   try {
-    await jwtVerify(token, JWT_SECRET);
-    return true;
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const isVerifier = payload.role === VERIFIER_ROLE;
+    return role === "verifier" ? isVerifier : !isVerifier;
   } catch {
     return false;
   }
 }
 
+function redirectToLogin(request: NextRequest, role: Role): NextResponse {
+  const loginUrl = new URL(LOGIN_PATH, request.url);
+  loginUrl.searchParams.set("next", request.nextUrl.pathname); // preserve destination
+  if (role === "verifier") loginUrl.searchParams.set("role", "provider");
+  return NextResponse.redirect(loginUrl);
+}
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  const { pathname } = request.nextUrl;
-  const token = request.cookies.get(AUTH_COOKIE)?.value;
+  const { pathname, searchParams } = request.nextUrl;
 
-  const authenticated = token ? await isValidToken(token) : false;
-
-  // Redirect unauthenticated users away from protected routes
-  if (isProtected(pathname) && !authenticated) {
-    const loginUrl = new URL(LOGIN_PATH, request.url);
-    loginUrl.searchParams.set('next', pathname); // preserve intended destination
-    return NextResponse.redirect(loginUrl);
+  // Service Provider portal (FR-033) — provider session only.
+  if (pathname.startsWith("/verifier")) {
+    const ok = await hasValidSession(
+      request.cookies.get(VERIFIER_COOKIE)?.value,
+      "verifier",
+    );
+    return ok ? NextResponse.next() : redirectToLogin(request, "verifier");
   }
 
-  // Redirect authenticated users away from login/register pages
-  if (isAuthPage(pathname) && authenticated) {
-    const next = request.nextUrl.searchParams.get('next') ?? '/dashboard';
-    return NextResponse.redirect(new URL(next, request.url));
+  // End User dashboard — user session only.
+  if (pathname.startsWith("/dashboard")) {
+    const ok = await hasValidSession(
+      request.cookies.get(AUTH_COOKIE)?.value,
+      "user",
+    );
+    return ok ? NextResponse.next() : redirectToLogin(request, "user");
+  }
+
+  // Already signed in for the chosen role → skip the login/register page.
+  if (AUTH_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
+    const role: Role =
+      searchParams.get("role") === "provider" ||
+      pathname.startsWith("/auth/provider-register")
+        ? "verifier"
+        : "user";
+    const cookie = role === "verifier" ? VERIFIER_COOKIE : AUTH_COOKIE;
+    if (await hasValidSession(request.cookies.get(cookie)?.value, role)) {
+      const fallback =
+        role === "verifier" ? "/verifier/dashboard" : "/dashboard";
+      return NextResponse.redirect(
+        new URL(searchParams.get("next") ?? fallback, request.url),
+      );
+    }
   }
 
   return NextResponse.next();
@@ -64,9 +94,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
 export const config = {
   matcher: [
-    '/dashboard/:path*',
-    '/verifier/:path*',
-    '/auth/login',
-    '/auth/register',
+    "/dashboard/:path*",
+    "/verifier/:path*",
+    "/auth/login",
+    "/auth/register",
+    "/auth/provider-register",
   ],
 };

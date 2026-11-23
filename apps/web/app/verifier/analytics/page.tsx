@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { fetchVerifierRequests, FIELD_CATEGORY, type VerifierRequestRow } from '@/lib/verifierApi';
 import {
   LineChart,
   Line,
@@ -22,7 +23,8 @@ interface VerificationRow {
   id: string;
   requestedFields: string[];
   status: Status;
-  responseTimeSec: number;
+  /** null when the request expired without a decision */
+  responseTimeSec: number | null;
   credentialType: 'identity' | 'education' | 'employment' | 'enrollment';
   createdAt: string;
 }
@@ -51,37 +53,25 @@ interface AnalyticsPayload {
   };
 }
 
-// ── Mock data generator ───────────────────────────────────────────────────────
+// ── Real data → payload ───────────────────────────────────────────────────────
 
-function mockData(from: Date, to: Date): AnalyticsPayload {
-  const FIELDS = [
-    'degree_title', 'university', 'age_over_18', 'full_name',
-    'enrollment_status', 'current_company', 'current_title', 'cnic',
-    'year_of_award', 'experience_years',
-  ];
-  const CRED_TYPES: VerificationRow['credentialType'][] = [
-    'education', 'identity', 'employment', 'enrollment',
-  ];
-  const STATUSES: Status[] = ['completed', 'completed', 'completed', 'rejected', 'expired'];
+/**
+ * Builds the analytics payload from this provider's real request log.
+ * Pending requests are left out — analytics cover finished verifications.
+ */
+function buildPayload(source: VerifierRequestRow[], from: Date, to: Date): AnalyticsPayload {
+  const rows: VerificationRow[] = source
+    .filter((r): r is VerifierRequestRow & { status: Status } => r.status !== 'pending')
+    .map((r) => ({
+      id: r.id,
+      requestedFields: r.requestedFields,
+      status: r.status,
+      responseTimeSec: r.responseTimeSec,
+      credentialType: FIELD_CATEGORY[r.requestedFields[0] ?? ''] ?? 'identity',
+      createdAt: r.createdAt,
+    }));
 
-  // Build rows spanning the date range
-  const msRange = to.getTime() - from.getTime();
-  const rows: VerificationRow[] = Array.from({ length: 120 }, (_, i) => {
-    const createdAt = new Date(from.getTime() + Math.random() * msRange);
-    const status = STATUSES[Math.floor(Math.random() * STATUSES.length)];
-    const numFields = Math.floor(Math.random() * 3) + 1;
-    const shuffled = [...FIELDS].sort(() => Math.random() - 0.5).slice(0, numFields);
-    return {
-      id: `req_${i.toString(16).padStart(8, '0')}`,
-      requestedFields: shuffled,
-      status,
-      responseTimeSec: parseFloat((Math.random() * 25 + 1).toFixed(1)),
-      credentialType: CRED_TYPES[Math.floor(Math.random() * CRED_TYPES.length)],
-      createdAt: createdAt.toISOString(),
-    };
-  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  // Build daily time-series
+  // Daily time-series across the selected range
   const dayMap: Record<string, DailyPoint> = {};
   const cursor = new Date(from);
   while (cursor <= to) {
@@ -105,9 +95,8 @@ function mockData(from: Date, to: Date): AnalyticsPayload {
   const completed = rows.filter((r) => r.status === 'completed').length;
   const rejected  = rows.filter((r) => r.status === 'rejected').length;
   const expired   = rows.filter((r) => r.status === 'expired').length;
-  const avgRT = parseFloat(
-    (rows.reduce((s, r) => s + r.responseTimeSec, 0) / rows.length).toFixed(1)
-  );
+  const times = rows.map((r) => r.responseTimeSec).filter((t): t is number => t !== null);
+  const avgRT = times.length ? parseFloat((times.reduce((a, b) => a + b, 0) / times.length).toFixed(1)) : 0;
 
   return { rows, daily, fieldStats, totals: { completed, rejected, expired, avgResponseTime: avgRT } };
 }
@@ -121,7 +110,7 @@ function exportCSV(rows: VerificationRow[]) {
     r.status,
     r.requestedFields.join(' | '),
     r.credentialType,
-    r.responseTimeSec,
+    r.responseTimeSec ?? '',
     new Date(r.createdAt).toLocaleString(),
   ].join(','));
   const csv = [header.join(','), ...lines].join('\n');
@@ -227,21 +216,12 @@ export default function AnalyticsPage() {
     setLoading(true);
     setPage(1);
     try {
-      const token = document.cookie
-        .split('; ')
-        .find((c) => c.startsWith('nexusid_token='))
-        ?.split('=')[1];
-
-      const params = new URLSearchParams({ from: fromDate, to: toDate });
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/analytics/verifications?${params}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) throw new Error();
-      const json = await res.json();
-      setData(json.data);
+      const from = new Date(fromDate);
+      const to = new Date(`${toDate}T23:59:59.999`);
+      setData(buildPayload(await fetchVerifierRequests(from, to), from, to));
     } catch {
-      setData(mockData(new Date(fromDate), new Date(toDate)));
+      // Honest empty state — never invented numbers.
+      setData(buildPayload([], new Date(fromDate), new Date(toDate)));
     } finally {
       setLoading(false);
     }
@@ -588,12 +568,13 @@ export default function AnalyticsPage() {
                       <span
                         className="text-xs font-mono"
                         style={{
-                          color: row.responseTimeSec < 10 ? '#22C55E'
+                          color: row.responseTimeSec === null ? '#525A72'
+                               : row.responseTimeSec < 10 ? '#22C55E'
                                : row.responseTimeSec < 20 ? '#F59E0B'
                                : '#EF4444',
                         }}
                       >
-                        {row.responseTimeSec}s
+                        {row.responseTimeSec === null ? '—' : `${row.responseTimeSec}s`}
                       </span>
                     </td>
                     <td className="px-6 py-3.5">

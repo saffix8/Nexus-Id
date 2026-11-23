@@ -1,165 +1,137 @@
-// services/backend/src/routes/verification.route.ts
+// services/backend/src/routes/verifiers.route.ts
+//
+// /api/v1/verifiers — Service Provider accounts (SRS FR-033, FR-034).
+// Logic lives in verifier-account.service.ts.
 
-import { Router, Request, Response, NextFunction } from 'express';
-import { z } from 'zod';
-import prisma from '../lib/prisma.js';
-import { verifyJWT } from '../middleware/auth.middleware.js';
-import { success, failure } from '../lib/response.js';
-import crypto from 'crypto';
+import {
+  Router,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
+import { z } from "zod";
+import { requireVerifierJWT } from "../middleware/auth.middleware.js";
+import { ValidationError } from "../middleware/error.middleware.js";
+import { success } from "../lib/response.js";
+import { verifierAccountService } from "../services/verifier-account.service.js";
 
 const router = Router();
 
-// ── Zod Schemas ───────────────────────────────────────────────────────────────
-
-const CreateRequestSchema = z.object({
-  verifier_id: z.string().min(1, 'verifier_id is required'),
-  verifier_name: z.string().min(1, 'verifier_name is required'),
-  requested_fields: z.array(z.string()).min(1, 'At least one field must be requested'),
-  nonce: z.string().min(1, 'nonce is required'),
-  page_url: z.string().url('page_url must be a valid URL'),
-  callback_url: z.string().url('callback_url must be a valid URL').optional(),
+const RegisterSchema = z.object({
+  email: z.string().email("Enter a valid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  displayName: z.string().min(1, "Organisation name is required").max(120),
+  domain: z
+    .string()
+    .min(3, "Domain is required")
+    .max(253)
+    .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, "Enter a domain like example.com"),
 });
 
-const SubmitProofSchema = z.object({
-  verification_request_id: z.string().min(1, 'verification_request_id is required'),
-  proof: z.object({
-    presentation: z.object({
-      sd_jwt: z.string().min(1),
-      disclosures: z.array(z.string()),
-    }),
-    key_binding: z.string().min(1),
-    timestamp: z.string().min(1),
-    verifier_id: z.string().min(1),
-  }),
+const LoginSchema = z.object({
+  email: z.string().email("Enter a valid email address"),
+  password: z.string().min(1, "Password is required"),
 });
 
+const RangeSchema = z.object({
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
+});
 
+function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new ValidationError(
+      parsed.error.issues[0]?.message ?? "Validation failed",
+    );
+  }
+  return parsed.data;
+}
 
-// ── POST /api/v1/verification/request ─────────────────────────────────────────
-
+// POST /verifiers/register — UC-008. Returns a session and the first API key.
 router.post(
-  '/request',
+  "/register",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const parsed = CreateRequestSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(422).json(failure(parsed.error.issues[0]?.message ?? 'Validation failed'));
-        return;
-      }
-
-      const { verifier_id, requested_fields, nonce, page_url, callback_url } = parsed.data;
-      const sessionId = crypto.randomUUID();
-
-      const verificationRequest = await prisma.verificationRequest.create({
-        data: {
-          id: sessionId,
-          verifierId: verifier_id,
-          requestedFields: requested_fields,
-          nonce,
-          pageUrl: page_url,
-          callbackUrl: callback_url ?? null,
-          status: 'pending',
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 mins expiry
-        },
-      });
-
-      res.status(201).json(
-        success({
-          sessionId: verificationRequest.id,
-          status: verificationRequest.status,
-          qrPayload: JSON.stringify({
-            sessionId: verificationRequest.id,
-            callbackUrl: verificationRequest.callbackUrl ?? `http://localhost:4000/api/v1/verification/submit-proof`,
-            requestedFields: requested_fields,
-            nonce,
-          }),
-        })
-      );
+      const body = parseOrThrow(RegisterSchema, req.body);
+      res
+        .status(201)
+        .json(success(await verifierAccountService.register(body)));
     } catch (err) {
       next(err);
     }
-  }
+  },
 );
 
-// ── POST /api/v1/verification/submit-proof ────────────────────────────────────
-
+// POST /verifiers/login — FR-033.
 router.post(
-  '/submit-proof',
-  verifyJWT,
+  "/login",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const parsed = SubmitProofSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(422).json(failure(parsed.error.issues[0]?.message ?? 'Validation failed'));
-        return;
-      }
-
-      const { verification_request_id } = parsed.data;
-
-      const requestRecord = await prisma.verificationRequest.findUnique({
-        where: { id: verification_request_id },
-      });
-
-      if (!requestRecord) {
-        res.status(404).json(failure('Verification session not found'));
-        return;
-      }
-
-      if (requestRecord.status !== 'pending') {
-        res.status(400).json(failure('Verification session is already completed or expired'));
-        return;
-      }
-
-      const updatedRequest = await prisma.verificationRequest.update({
-        where: { id: verification_request_id },
-        data: {
-          status: 'verified',
-          completedAt: new Date(),
-        },
-      });
-
-      res.status(200).json(
-        success({
-          sessionId: updatedRequest.id,
-          status: updatedRequest.status,
-          message: 'Proof submitted and verified successfully',
-        })
-      );
+      const { email, password } = parseOrThrow(LoginSchema, req.body);
+      res
+        .status(200)
+        .json(success(await verifierAccountService.login(email, password)));
     } catch (err) {
       next(err);
     }
-  }
+  },
 );
 
-// ── GET /api/v1/verification/session/:id ──────────────────────────────────────
-
+// GET /verifiers/me — profile (never the API key itself).
 router.get(
-  '/session/:id',
+  "/me",
+  requireVerifierJWT,
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const id = String(req.params.id);
-
-      const requestRecord = await prisma.verificationRequest.findUnique({
-        where: { id },
-      });
-
-      if (!requestRecord) {
-        res.status(404).json(failure('Verification session not found'));
-        return;
-      }
-
-      res.status(200).json(
-        success({
-          sessionId: requestRecord.id,
-          status: requestRecord.status,
-          requestedFields: requestRecord.requestedFields,
-          createdAt: requestRecord.createdAt,
-        })
-      );
+      res
+        .status(200)
+        .json(success(await verifierAccountService.getProfile(req.user!.sub)));
     } catch (err) {
       next(err);
     }
-  }
+  },
+);
+
+// POST /verifiers/me/api-key — UC-009: generate / rotate (BR-009).
+router.post(
+  "/me/api-key",
+  requireVerifierJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      res
+        .status(200)
+        .json(
+          success(await verifierAccountService.rotateApiKey(req.user!.sub)),
+        );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /verifiers/me/requests?from&to — verification log for the portal.
+router.get(
+  "/me/requests",
+  requireVerifierJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const range = parseOrThrow(RangeSchema, req.query);
+      const to = range.to ? new Date(range.to) : new Date();
+      const from = range.from
+        ? new Date(range.from)
+        : new Date(to.getTime() - 30 * 86_400_000);
+      res
+        .status(200)
+        .json(
+          success(
+            await verifierAccountService.listRequests(req.user!.sub, from, to),
+          ),
+        );
+    } catch (err) {
+      next(err);
+    }
+  },
 );
 
 export default router;

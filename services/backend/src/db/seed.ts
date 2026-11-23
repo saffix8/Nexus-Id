@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 
 const prisma = new PrismaClient();
 
@@ -83,7 +83,10 @@ async function seedVerifiers(): Promise<void> {
       domain: 'demo-jobportal.nexusid.com',
       displayName: 'Demo Job Portal',
       logoUrl: null,
-      apiKey: 'demo_api_key_12345',
+      // Plaintext demo key "demo_api_key_12345" (used by demo/test-verifier.html);
+      // only its SHA-256 hash is stored (FR-034).
+      apiKey: createHash('sha256').update('demo_api_key_12345', 'utf8').digest('hex'),
+      apiKeyPrefix: 'demo_api',
       trusted: true,
     },
     update: {

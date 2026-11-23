@@ -1,21 +1,22 @@
 // services/backend/src/routes/analytics.route.ts
+// Programmatic analytics for a Service Provider's own backend, authenticated
+// with its API key (same middleware as verification requests — keys are
+// looked up by hash, see api-key.middleware.ts).
 import { Router } from 'express';
 import prisma from '../lib/prisma.js';
 import { success } from '../lib/response.js';
+import { requireApiKey } from '../middleware/api-key.middleware.js';
 
 const router = Router();
 
-// GET /api/v1/analytics/verifications  — auth via verifier api_key header, not user JWT
-router.get('/verifications', async (req, res, next) => {
+// GET /api/v1/analytics/verifications
+router.get('/verifications', requireApiKey, async (req, res, next) => {
   try {
-    const apiKey = req.header('x-api-key');
-    const verifier = apiKey ? await prisma.verifier.findUnique({ where: { apiKey } }) : null;
-    if (!verifier) return res.status(401).json({ success: false, error: 'Invalid API key' });
-
+    const verifierId = req.verifier!.id;
     const [total, requests] = await Promise.all([
-      prisma.verificationRequest.count({ where: { verifierId: verifier.id } }),
+      prisma.verificationRequest.count({ where: { verifierId } }),
       prisma.verificationRequest.findMany({
-        where: { verifierId: verifier.id },
+        where: { verifierId },
         orderBy: { createdAt: 'desc' },
         take: 30,
       }),
@@ -28,14 +29,10 @@ router.get('/verifications', async (req, res, next) => {
 });
 
 // GET /api/v1/analytics/recent
-router.get('/recent', async (req, res, next) => {
+router.get('/recent', requireApiKey, async (req, res, next) => {
   try {
-    const apiKey = req.header('x-api-key');
-    const verifier = apiKey ? await prisma.verifier.findUnique({ where: { apiKey } }) : null;
-    if (!verifier) return res.status(401).json({ success: false, error: 'Invalid API key' });
-
     const recent = await prisma.verificationRequest.findMany({
-      where: { verifierId: verifier.id },
+      where: { verifierId: req.verifier!.id },
       orderBy: { createdAt: 'desc' },
       take: 10,
     });

@@ -3,10 +3,11 @@
 import { Dialog, Transition } from "@headlessui/react";
 import { Fragment, useState, useEffect, useRef, useCallback } from "react";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import type { SDJWTCredential } from "@nexusid/types";
 import { ensureWebKeypair } from "@/lib/webKeypair";
+import { saveWebCredential } from "@/lib/webWallet";
+import { parseForm } from "@/lib/forms";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -358,16 +359,20 @@ function NadraFlow({
   const {
     register: regForm,
     handleSubmit: handleForm,
+    setError: setFormError,
     formState: { errors: formErrors, isSubmitting: formSubmitting },
-  } = useForm<NadraFormData>({ resolver: zodResolver(nadraSchema) });
+  } = useForm<NadraFormData>();
 
   const {
     register: regOtp,
     handleSubmit: handleOtp,
+    setError: setOtpError,
     formState: { errors: otpErrors, isSubmitting: otpSubmitting },
-  } = useForm<NadraOtpData>({ resolver: zodResolver(nadraOtpSchema) });
+  } = useForm<NadraOtpData>();
 
-  async function submitForm(data: NadraFormData) {
+  async function submitForm(raw: NadraFormData) {
+    const data = parseForm(nadraSchema, raw, setFormError);
+    if (!data) return;
     try {
       const res = await apiFetch<{ session_id: string }>(
         `${API}/credentials/nadra/verify`,
@@ -383,7 +388,9 @@ function NadraFlow({
     }
   }
 
-  async function submitOtp(data: NadraOtpData) {
+  async function submitOtp(raw: NadraOtpData) {
+    const data = parseForm(nadraOtpSchema, raw, setOtpError);
+    if (!data) return;
     onProcessing();
     try {
       const res = await apiFetch<{ credential: SDJWTCredential }>(
@@ -506,10 +513,13 @@ function HECFlow({
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
-  } = useForm<HecFormData>({ resolver: zodResolver(hecSchema) });
+  } = useForm<HecFormData>();
 
-  async function onSubmit(data: HecFormData) {
+  async function onSubmit(raw: HecFormData) {
+    const data = parseForm(hecSchema, raw, setError);
+    if (!data) return;
     onProcessing();
     try {
       const res = await apiFetch<{ credential: SDJWTCredential }>(
@@ -593,10 +603,13 @@ function AirUniversityFlow({
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
-  } = useForm<AUFormData>({ resolver: zodResolver(auSchema) });
+  } = useForm<AUFormData>();
 
-  async function onSubmit(data: AUFormData) {
+  async function onSubmit(raw: AUFormData) {
+    const data = parseForm(auSchema, raw, setError);
+    if (!data) return;
     onProcessing();
     try {
       const res = await apiFetch<{ credential: SDJWTCredential }>(
@@ -1115,7 +1128,14 @@ export function AddCredentialModal({
     setStep({ id: "processing", source });
   }
 
-  function handleSuccess(credential: SDJWTCredential) {
+  async function handleSuccess(credential: SDJWTCredential) {
+    // The backend keeps metadata only; the holder keeps the SD-JWT itself
+    // (encrypted, in this browser) so it can present it later.
+    try {
+      await saveWebCredential(credential);
+    } catch (err) {
+      console.warn("[AddCredentialModal] Could not store credential locally:", err);
+    }
     setStep({ id: "success", credential });
   }
 

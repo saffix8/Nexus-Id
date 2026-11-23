@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useVerifierProfile } from '@/lib/verifierApi';
 
 const NAV_ITEMS = [
   {
@@ -73,10 +74,13 @@ export default function VerifierLayout({ children }: { children: React.ReactNode
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const pageTitle = PAGE_TITLES[pathname] ?? 'Verifier Portal';
+  const { data: profile } = useVerifierProfile();
 
-  function handleLogout() {
-    document.cookie = 'nexusid_token=; Max-Age=0; path=/';
-    router.push('/auth/login');
+  // The provider session cookie is httpOnly — only the server can clear it.
+  async function handleLogout() {
+    await fetch('/api/auth?action=verifier-logout', { method: 'POST' });
+    router.push('/auth/login?role=provider');
+    router.refresh();
   }
 
   return (
@@ -173,13 +177,13 @@ export default function VerifierLayout({ children }: { children: React.ReactNode
                 onClick={() => setUserMenuOpen((v) => !v)}
                 className="w-8 h-8 rounded-full bg-gradient-to-br from-[#3B6FE8] to-[#5B4FE8] flex items-center justify-center text-white text-xs font-semibold"
               >
-                V
+                {(profile?.displayName ?? 'V').charAt(0).toUpperCase()}
               </button>
               {userMenuOpen && (
                 <div className="absolute right-0 top-10 w-48 bg-[#13161E] border border-[#252C3D] rounded-lg shadow-lg py-1 z-50">
                   <div className="px-3 py-2 border-b border-[#1E2330]">
-                    <p className="text-xs text-[#EEF0F6] font-medium">Verifier Account</p>
-                    <p className="text-xs text-[#525A72] mt-0.5 font-mono">demo-jobportal.com</p>
+                    <p className="text-xs text-[#EEF0F6] font-medium">{profile?.displayName ?? 'Verifier Account'}</p>
+                    <p className="text-xs text-[#525A72] mt-0.5 font-mono">{profile?.domain ?? '—'}</p>
                   </div>
                   <button
                     onClick={handleLogout}

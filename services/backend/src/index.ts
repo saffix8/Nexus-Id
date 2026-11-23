@@ -12,10 +12,11 @@ import authRouter from "./routes/auth.route.js";
 import usersRouter from "./routes/users.route.js";
 import credentialsRouter from "./routes/credentials.route.js";
 import verificationRouter from "./routes/verification.route.js";
-import verifiersRouter from "./routes/verifiers.route.js";
 import issuersRouter from "./routes/issuers.route.js";
 import analyticsRouter from "./routes/analytics.route.js";
 import adminRouter from "./routes/admin.route.js";
+import pairingRouter from "./routes/pairing.route.js";
+import verifiersRouter from "./routes/verifiers.route.js";
 
 const PORT = Number(process.env.PORT) || 4000;
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -65,10 +66,11 @@ export function createApp() {
   app.use(`${API}/users`, usersRouter);
   app.use(`${API}/credentials`, credentialsRouter);
   app.use(`${API}/verification`, verificationRouter);
-  app.use(`${API}/verifiers`, verifiersRouter);
   app.use(`${API}/issuers`, issuersRouter);
   app.use(`${API}/analytics`, analyticsRouter);
   app.use(`${API}/admin`, adminRouter);
+  app.use(`${API}/pairing`, pairingRouter);
+  app.use(`${API}/verifiers`, verifiersRouter);
 
   // 404 handler
   app.use((_req, res) => {

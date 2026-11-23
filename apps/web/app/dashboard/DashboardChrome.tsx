@@ -30,6 +30,25 @@ function ShieldIcon({ className }: { className?: string }) {
   );
 }
 
+function InboxIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M3 11l2-7h10l2 7v5H3v-5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M3 11h4l1 2h4l1-2h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DevicesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="2" y="4" width="11" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M5 15h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <rect x="14" y="7" width="4" height="9" rx="1" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 function ClockIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -91,7 +110,9 @@ function NexusIDMark() {
 const NAV_ITEMS = [
   { label: 'Dashboard',       href: '/dashboard',             Icon: GridIcon   },
   { label: 'My Credentials',  href: '/dashboard/credentials', Icon: ShieldIcon },
+  { label: 'Requests',        href: '/dashboard/requests',    Icon: InboxIcon  },
   { label: 'History',         href: '/dashboard/history',     Icon: ClockIcon  },
+  { label: 'Devices',         href: '/dashboard/devices',     Icon: DevicesIcon },
   { label: 'Settings',        href: '/dashboard/settings',    Icon: GearIcon   },
 ] as const;
 

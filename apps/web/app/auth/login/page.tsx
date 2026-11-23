@@ -139,7 +139,7 @@ export default function LoginPage({
             </div>
           )}
 
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+          <form method="post" onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="email" className="text-sm font-medium text-[#8B92A8] tracking-wide">
                 Email

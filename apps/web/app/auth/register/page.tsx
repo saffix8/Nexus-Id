@@ -183,7 +183,7 @@ export default function RegisterPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+          <form method="post" onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
             <Field
               id="name"
               label="Full name"

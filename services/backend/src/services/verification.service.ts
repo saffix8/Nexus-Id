@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { createHash } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { verifyProof } from "@nexusid/sd-jwt";
 import prisma from "../lib/prisma.js";
 import { notificationService } from "./notification.service.js";
@@ -26,20 +26,34 @@ export class VerificationError extends Error {
 // Internal types
 // ---------------------------------------------------------------------------
 
-export interface CreateRequestParams {
+export interface CreateSessionParams {
   verifierId: string;
-  verifierName: string;
   requestedFields: string[];
-  nonce: string;
   callbackUrl?: string;
+}
+
+export interface CreateSessionResult {
+  sessionId: string;
+  /** Backend-generated, single-use (FR-043, BR-005). The SP embeds it in its page. */
+  nonce: string;
+  requestedFields: string[];
+  expiresAt: string;
+}
+
+export interface RelayRequestParams {
+  sessionId: string;
+  nonce: string;
   pageUrl: string;
   /** The extension's pairing token (x-pairing-token header, SRS IF-005). */
   pairingToken: string;
 }
 
-export interface CreateRequestResult {
+export interface RelayRequestResult {
   requestId: string;
-  status: "queued";
+  /** The extension's credential for polling this request (API-033). Shown once. */
+  pollSecret: string;
+  verifierName: string;
+  requestedFields: string[];
   notification_sent: boolean;
   expiresAt: string;
 }
@@ -104,12 +118,17 @@ export interface HistoryResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const EXPIRY_MINUTES = 5;
+/** Verification response window, measured from session creation (FR-024, BR-022). */
+export const RESPONSE_WINDOW_MS = 120 * 1000;
 
-function buildExpiresAt(): Date {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() + EXPIRY_MINUTES);
-  return d;
+function randomToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function sameSecret(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
 function sha256Hex(data: string): string {
@@ -148,23 +167,63 @@ function extractIssuerFromSDJWT(sdJwt: string): string {
 // ---------------------------------------------------------------------------
 
 export class VerificationService {
-  // ─── POST /request ────────────────────────────────────────────────────────
+  // ─── API-030 POST /sessions (Service Provider, API key) ─────────────────
 
-  async createRequest(
-    params: CreateRequestParams,
-  ): Promise<CreateRequestResult> {
-    const {
-      verifierId,
-      verifierName,
-      requestedFields,
+  /**
+   * FR-043 — the Service Provider's server opens a session. The backend
+   * generates the session ID and a single-use nonce; the SP embeds both in its
+   * page for the extension to detect (FR-032). Nothing is routed yet.
+   */
+  async createSession(params: CreateSessionParams): Promise<CreateSessionResult> {
+    const { verifierId, requestedFields, callbackUrl } = params;
+
+    const sessionId = uuidv4();
+    const nonce = randomToken();
+    const expiresAt = new Date(Date.now() + RESPONSE_WINDOW_MS);
+
+    await prisma.$transaction([
+      prisma.verificationRequest.create({
+        data: {
+          id: sessionId,
+          verifierId,
+          requestedFields,
+          nonce,
+          callbackUrl: callbackUrl ?? null,
+          status: "pending",
+          expiresAt,
+        },
+      }),
+      prisma.auditLog.create({
+        data: {
+          eventType: "verification_session_created",
+          requestId: sessionId,
+          verifierId,
+          metadata: { requestedFields },
+        },
+      }),
+    ]);
+
+    return {
+      sessionId,
       nonce,
-      callbackUrl,
-      pageUrl,
-      pairingToken,
-    } = params;
+      requestedFields,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
 
-    // 0. Route to the End User this extension is paired with (SRS FR-003).
-    // An unpaired or revoked browser has no device to send the request to.
+  // ─── API-032 POST /request (extension, pairing token) ─────────────────────
+
+  /**
+   * FR-032 — the extension relays a session it detected on a page. The
+   * backend checks the session ID and nonce against the stored session and its
+   * expiry, routes it to the paired End User only (FR-003), and notifies their
+   * device (FR-019). An unknown, expired or invalid session is rejected and
+   * nothing is sent to the End User.
+   */
+  async relayRequest(params: RelayRequestParams): Promise<RelayRequestResult> {
+    const { sessionId, nonce, pageUrl, pairingToken } = params;
+
+    // 0. Only a paired browser can relay (FR-003 AC3).
     const userId = pairingToken
       ? await pairingService.resolvePairedUser(pairingToken)
       : null;
@@ -177,150 +236,166 @@ export class VerificationService {
       );
     }
 
-    // 1. Replay-attack guard — nonce must never have been used.
-    const usedNonce = await prisma.usedNonce.findUnique({
-      where: { nonce },
+    // 1. The session must exist and the nonce must be the one the backend
+    // issued for it. A wrong nonce looks the same as an unknown session.
+    const session = await prisma.verificationRequest.findUnique({
+      where: { id: sessionId },
+      include: { verifier: { select: { displayName: true } } },
     });
 
-    if (usedNonce) {
+    if (!session || !sameSecret(session.nonce, nonce)) {
       throw new VerificationError(
-        "Nonce has already been consumed",
-        "NONCE_REPLAY",
-        400,
+        "Unknown verification session",
+        "INVALID_SESSION",
+        404,
       );
     }
 
-    // Also reject if a live request already holds this nonce.
-    const liveRequest = await prisma.verificationRequest.findFirst({
+    if (session.status === "pending" && new Date() > session.expiresAt) {
+      await prisma.verificationRequest.update({
+        where: { id: sessionId },
+        data: { status: "expired" },
+      });
+    }
+    if (session.status === "expired" || new Date() > session.expiresAt) {
+      throw new VerificationError(
+        "This verification session has expired. Reload the page to start a new one.",
+        "SESSION_EXPIRED",
+        410,
+      );
+    }
+
+    // 2. A session is relayed once. The conditional update stops two relays
+    // (or a replayed relay) from both succeeding.
+    const pollSecret = randomToken();
+    const relayedAt = new Date();
+    const claimed = await prisma.verificationRequest.updateMany({
       where: {
-        nonce,
-        status: {
-          in: ["pending", "completed"],
-        },
-      },
-    });
-
-    if (liveRequest) {
-      throw new VerificationError(
-        "A live request with this nonce already exists",
-        "NONCE_IN_USE",
-        400,
-      );
-    }
-
-    // 2. Persist the verification request.
-    const requestId = uuidv4();
-    const expiresAt = buildExpiresAt();
-
-    await prisma.verificationRequest.create({
-      data: {
-        id: requestId,
-        verifierId,
-        userId,
-        requestedFields,
-        nonce,
-        callbackUrl: callbackUrl ?? null,
-        pageUrl,
+        id: sessionId,
         status: "pending",
-        expiresAt,
+        userId: null,
+        expiresAt: { gt: relayedAt },
+      },
+      data: {
+        userId,
+        pageUrl,
+        relayedAt,
+        pollSecretHash: sha256Hex(pollSecret),
       },
     });
 
-    // 3. Push only to the paired End User's device.
-    const users = await prisma.user.findMany({
-      where: {
-        id: userId,
-        pushToken: {
-          not: null,
-        },
-      },
-      select: {
-        pushToken: true,
-      },
+    if (claimed.count === 0) {
+      throw new VerificationError(
+        "This verification session has already been used",
+        "SESSION_ALREADY_RELAYED",
+        409,
+      );
+    }
+
+    const verifierName = session.verifier?.displayName ?? "Unknown platform";
+    const requestedFields = session.requestedFields;
+
+    // 3. Push only to the paired End User's device (FR-019).
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { pushToken: true },
     });
 
-    const pushTokens = users
-      .map((user) => user.pushToken)
-      .filter((token): token is string => Boolean(token));
-
-    // 4. Dispatch FCM notifications.
-    // A notification failure must never fail verification-request creation.
+    // A notification failure must never fail the relay.
     let notification_sent = false;
-
-    for (const pushToken of pushTokens) {
+    if (user?.pushToken) {
       try {
         await notificationService.sendVerificationRequest({
-          push_token: pushToken,
-          verification_request_id: requestId,
-          verifier_id: verifierId,
+          push_token: user.pushToken,
+          verification_request_id: sessionId,
+          verifier_id: session.verifierId ?? "",
           verifier_name: verifierName,
           requested_fields: requestedFields,
-          nonce,
-          expires_at: expiresAt.toISOString(),
+          nonce: session.nonce,
+          expires_at: session.expiresAt.toISOString(),
         });
-
         notification_sent = true;
       } catch (err) {
-        console.error(
-          "[VerificationService.createRequest] FCM send failed:",
-          err,
-        );
+        console.error("[VerificationService.relayRequest] FCM send failed:", err);
       }
     }
 
-    // 5. Audit log.
+    // 4. Audit log.
     await prisma.auditLog.create({
       data: {
         eventType: "verification_request_created",
-        requestId,
-        verifierId,
+        requestId: sessionId,
+        verifierId: session.verifierId,
         metadata: {
           requestedFields,
           pageUrl,
           notification_sent,
-          users_notified: pushTokens.length,
+          users_notified: user?.pushToken ? 1 : 0,
         },
       },
     });
 
     return {
-      requestId,
-      status: "queued",
+      requestId: sessionId,
+      pollSecret,
+      verifierName,
+      requestedFields,
       notification_sent,
-      expiresAt: expiresAt.toISOString(),
+      expiresAt: session.expiresAt.toISOString(),
     };
   }
 
-  // ─── GET /request/:id ─────────────────────────────────────────────────────
+  // ─── API-031 GET /sessions/:id/outcome (Service Provider, API key) ────────
 
-  async pollRequest(
-    requestId: string,
-    verifierId: string,
-  ): Promise<PollResult> {
+  /** FR-045 — the Service Provider's server reads the outcome of its session. */
+  async getSessionOutcome(sessionId: string, verifierId: string): Promise<PollResult> {
+    const request = await prisma.verificationRequest.findUnique({
+      where: { id: sessionId },
+    });
+
+    // A verifier may only read its own sessions. Another verifier's session
+    // is reported as not found so session IDs cannot be probed.
+    if (!request || request.verifierId !== verifierId) {
+      throw new VerificationError("Verification session not found", "NOT_FOUND", 404);
+    }
+
+    return this.buildOutcome(request);
+  }
+
+  // ─── API-033 GET /request/:id (extension, poll secret) ────────────────────
+
+  /** FR-034 — the extension polls the outcome of a request it relayed. */
+  async pollForExtension(requestId: string, pollSecret: string): Promise<PollResult> {
     const request = await prisma.verificationRequest.findUnique({
       where: { id: requestId },
     });
 
-    // A verifier may only read its own requests. Another verifier's request
-    // is reported as not found so request IDs cannot be probed.
-    if (!request || request.verifierId !== verifierId) {
-      throw new VerificationError(
-        "Verification request not found",
-        "NOT_FOUND",
-        404,
-      );
+    // A wrong secret is indistinguishable from a missing request.
+    if (
+      !request ||
+      !request.pollSecretHash ||
+      !sameSecret(request.pollSecretHash, sha256Hex(pollSecret))
+    ) {
+      throw new VerificationError("Verification request not found", "NOT_FOUND", 404);
     }
 
-    // Lazily expire stale pending requests on first poll.
+    return this.buildOutcome(request);
+  }
+
+  /** The outcome of one session, expiring it lazily once the window has passed. */
+  private async buildOutcome(request: {
+    id: string;
+    status: string;
+    expiresAt: Date;
+    rejectedAt: Date | null;
+    callbackUrl: string | null;
+  }): Promise<PollResult> {
     if (request.status === "pending" && new Date() > request.expiresAt) {
       await prisma.verificationRequest.update({
-        where: { id: requestId },
+        where: { id: request.id },
         data: { status: "expired" },
       });
-
-      return {
-        status: "expired",
-      };
+      return { status: "expired" };
     }
 
     const status = request.status as VerificationStatus;
@@ -345,7 +420,7 @@ export class VerificationService {
 
       case "completed": {
         const result = await prisma.verificationResult.findUnique({
-          where: { requestId },
+          where: { requestId: request.id },
         });
 
         return {
@@ -379,7 +454,7 @@ export class VerificationService {
 
     // Only the End User the request was routed to may answer it; anyone else
     // gets the same 404 as for a missing request.
-    if (!request || (request.userId !== null && request.userId !== user_id)) {
+    if (!request || request.userId !== user_id) {
       throw new VerificationError(
         "Verification request not found",
         "NOT_FOUND",
@@ -581,7 +656,7 @@ export class VerificationService {
 
     // Only the End User the request was routed to may answer it; anyone else
     // gets the same 404 as for a missing request.
-    if (!request || (request.userId !== null && request.userId !== user_id)) {
+    if (!request || request.userId !== user_id) {
       throw new VerificationError(
         "Verification request not found",
         "NOT_FOUND",

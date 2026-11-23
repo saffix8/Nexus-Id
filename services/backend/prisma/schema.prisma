@@ -89,6 +89,10 @@ model VerificationRequest {
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   completedAt     DateTime?           @map("completed_at") @db.Timestamptz(6)
   rejectedAt      DateTime?           @map("rejected_at") @db.Timestamptz(6)
+  /// When the extension relayed this session to the paired device (API-032, FR-032).
+  relayedAt       DateTime?           @map("relayed_at") @db.Timestamptz(6)
+  /// SHA-256 of the poll secret the extension uses to read the outcome (API-033).
+  pollSecretHash  String?             @unique @map("poll_secret_hash")
   fraudFlags      FraudFlag[]
   verifier        Verifier?           @relation(fields: [verifierId], references: [id])
   user            User?               @relation(fields: [userId], references: [id], onDelete: SetNull)

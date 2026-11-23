@@ -5,20 +5,20 @@
  * Responsibilities:
  *   1. Receive verification requests detected by content.js
  *   2. POST them to the NexusID backend
- *   3. Poll for results every 5 seconds (up to 5 minutes)
+ *   3. Poll for results every 5 seconds (the backend closes a session after 120 s)
  *   4. Relay results back to the originating tab's content script
  *   5. Show browser notifications on completion
  */
 
-'use strict';
+"use strict";
 
 // ─── CONFIGURATION ────────────────────────────────────────────────────────────
 
-const BACKEND_URL      = 'http://localhost:4000/api/v1';
+const BACKEND_URL = "http://localhost:4000/api/v1";
 const POLL_INTERVAL_MS = 5000;
-const MAX_POLL_ATTEMPTS = 60;   // 60 × 5s = 5 minutes
-const STORAGE_TTL_MS   = 60 * 60 * 1000; // 1 hour — entries older than this are cleaned up
-const NOTIFICATION_ICON = 'icons/icon48.png';
+const MAX_POLL_ATTEMPTS = 60; // 60 × 5s = 5 minutes
+const STORAGE_TTL_MS = 60 * 60 * 1000; // 1 hour — entries older than this are cleaned up
+const NOTIFICATION_ICON = "icons/icon48.png";
 
 // ─── STARTUP ──────────────────────────────────────────────────────────────────
 
@@ -28,13 +28,13 @@ const NOTIFICATION_ICON = 'icons/icon48.png';
  * polling intervals are lost on termination, so this also recovers orphaned
  * requests by marking them expired.
  */
-self.addEventListener('install', () => {
-  console.log('[NexusID] Background service worker installed.');
+self.addEventListener("install", () => {
+  console.log("[NexusID] Background service worker installed.");
   self.skipWaiting();
 });
 
-self.addEventListener('activate', async () => {
-  console.log('[NexusID] Background service worker activated.');
+self.addEventListener("activate", async () => {
+  console.log("[NexusID] Background service worker activated.");
   await cleanupStaleEntries();
   await recoverOrphanedRequests();
 });
@@ -50,143 +50,137 @@ self.addEventListener('activate', async () => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab ? sender.tab.id : null;
 
-  if (message.type === 'VERIFICATION_REQUEST_DETECTED') {
+  if (message.type === "VERIFICATION_REQUEST_DETECTED") {
     // Incoming request from content.js — start the verification flow
     handleVerificationRequest(message, tabId)
-      .then(result => sendResponse({ success: true, ...result }))
-      .catch(err => {
-        console.error('[NexusID] handleVerificationRequest failed:', err);
-        sendResponse({ success: false, error: err.message || 'Unknown error' });
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((err) => {
+        console.error("[NexusID] handleVerificationRequest failed:", err);
+        sendResponse({ success: false, error: err.message || "Unknown error" });
       });
     return true; // Keep channel open for async response
   }
 
-  if (message.type === 'CANCEL_VERIFICATION') {
+  if (message.type === "CANCEL_VERIFICATION") {
     // Incoming cancel from popup.js
     cancelVerification(message.request_id, tabId)
       .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  if (message.type === 'GET_ACTIVE_VERIFICATION') {
+  if (message.type === "GET_ACTIVE_VERIFICATION") {
     // Popup polling for current state
     getActiveVerification()
-      .then(result => sendResponse({ success: true, data: result }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .then((result) => sendResponse({ success: true, data: result }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  if (message.type === 'START_PAIRING') {
+  if (message.type === "START_PAIRING") {
     // Popup asks for a fresh pairing QR code (UC-002 step 1)
     startPairing()
-      .then(result => sendResponse({ success: true, data: result }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .then((result) => sendResponse({ success: true, data: result }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  if (message.type === 'CHECK_PAIRING') {
+  if (message.type === "CHECK_PAIRING") {
     // Popup polls while the QR is on screen (UC-002 step 5)
     checkPairing()
-      .then(result => sendResponse({ success: true, data: result }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .then((result) => sendResponse({ success: true, data: result }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  if (message.type === 'FORGET_PAIRING') {
-    chrome.storage.local.remove(PAIRING_STORAGE_KEY)
+  if (message.type === "FORGET_PAIRING") {
+    chrome.storage.local
+      .remove(PAIRING_STORAGE_KEY)
       .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
   // Unrecognised message type — respond immediately
-  sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
+  sendResponse({
+    success: false,
+    error: `Unknown message type: ${message.type}`,
+  });
   return false;
 });
 
 // ─── CORE: HANDLE VERIFICATION REQUEST ────────────────────────────────────────
 
 /**
- * Entry point for a new verification request detected by content.js.
+ * Entry point for a verification session detected by content.js (FR-032).
  *
- * 1. Generates a local request_id (UUID)
- * 2. POSTs the request to the NexusID backend
- * 3. Persists the request metadata to chrome.storage.local
- * 4. Starts polling for the result
+ * 1. Relays { sessionId, nonce } to the backend with this browser's pairing
+ *    token (API-032). The backend checks them against the session the
+ *    Service Provider opened (API-030) and notifies the paired device.
+ * 2. Persists the request, including the poll secret the backend returned.
+ * 3. Starts polling the outcome with that poll secret (API-033).
  *
- * @param {object} request - The message payload from content.js
+ * The Service Provider's API key is never involved: it stays on the SP's server.
+ *
+ * @param {object} request - { session_id, nonce, page_url } from content.js
  * @param {number|null} tabId - The tab ID of the originating page
- * @returns {Promise<{ request_id: string }>}
+ * @returns {Promise<{ request_id: string, verifier_name: string, requested_fields: string[] }>}
  */
 async function handleVerificationRequest(request, tabId) {
-  const {
-    verifier_id,
-    verifier_name,
-    requested_fields,
-    nonce,
-    callback_url,
-    page_url,
-    api_key,
-  } = request;
+  const { session_id, nonce, page_url } = request;
 
-  // Validate required fields before hitting the backend.
-  // api_key is the Service Provider's key (SRS FR-034); the backend derives the
-  // verifier identity from it — verifier_id here is only used for display.
-  if (!api_key || !requested_fields || !nonce || !page_url) {
-    throw new Error('Missing required fields: api_key, requested_fields, nonce, page_url');
+  if (!session_id || !nonce || !page_url) {
+    throw new Error("Missing required fields: session_id, nonce, page_url");
   }
 
   // SRS FR-003: requests are routed to the phone this browser is paired with.
-  const pairing = await getPairing();
-  if (!pairing || pairing.status !== 'paired') {
+  // A QR redeemed while the popup was closed is still 'pending' locally, so
+  // ask the backend (API-024) before refusing.
+  let pairing = await getPairing();
+  if (pairing && pairing.status === "pending") {
+    await checkPairing();
+    pairing = await getPairing();
+  }
+  if (!pairing || pairing.status !== "paired") {
     throw new Error(
-      'This browser is not paired with your NexusID app yet. ' +
-      'Open the NexusID extension and scan its QR code with your phone.'
+      "This browser is not paired with your NexusID app yet. " +
+        "Open the NexusID extension and scan its QR code with your phone.",
     );
   }
 
-  // Generate a local correlation ID so we can track this in storage
+  // Local correlation ID for storage and tab messages.
   const request_id = crypto.randomUUID();
 
-  console.log(`[NexusID] New verification request ${request_id} from ${verifier_id}`);
+  console.log(
+    `[NexusID] Relaying session ${session_id} (local: ${request_id})`,
+  );
 
-  // POST to backend. We track by our local request_id in storage and poll the
-  // backend by the requestId it returns.
-  let backendRequestId;
   let response;
   try {
-    // Shape must match CreateRequestSchema in
-    // services/backend/src/routes/verification.route.ts (camelCase).
-    const body = {
-      requestedFields: Array.isArray(requested_fields) ? requested_fields : [requested_fields],
-      nonce,
-      pageUrl: page_url,
-    };
-    // callbackUrl is optional on the backend — omit it rather than send null.
-    if (callback_url) body.callbackUrl = callback_url;
-
+    // Shape must match RelayRequestSchema in
+    // services/backend/src/routes/verification.route.ts.
     response = await fetchWithTimeout(
       `${BACKEND_URL}/verification/request`,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': api_key,
-          'x-pairing-token': pairing.pairing_token, // SRS IF-005 pairing token
+          "Content-Type": "application/json",
+          "x-pairing-token": pairing.pairing_token, // SRS IF-005 pairing token
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          sessionId: session_id,
+          nonce,
+          pageUrl: page_url,
+        }),
       },
-      10000 // 10 second timeout for the initial request
+      10000, // 10 second timeout for the relay
     );
-
   } catch (err) {
     // Network failure / timeout — the backend was never reached.
-    console.error('[NexusID] Failed to POST verification request to backend:', err);
+    console.error("[NexusID] Failed to relay verification session:", err);
     throw new Error(`Could not reach NexusID backend: ${err.message}`);
   }
 
-  // The backend answered — surface its error message as-is.
   let data = null;
   try {
     data = await response.json();
@@ -196,55 +190,71 @@ async function handleVerificationRequest(request, tabId) {
 
   if (!response.ok) {
     const detail = (data && data.error) || `HTTP ${response.status}`;
-    console.error('[NexusID] Backend rejected verification request:', response.status, detail);
-    if (response.status === 401) {
-      throw new Error(`This site's NexusID API key was rejected (${detail}).`);
-    }
+    console.error("[NexusID] Backend rejected relay:", response.status, detail);
     if (response.status === 409 && /not paired/i.test(detail)) {
       // Pairing was revoked from the phone/dashboard — forget it locally.
       await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
       throw new Error(
-        'This browser is no longer paired with your NexusID app. ' +
-        'Open the NexusID extension to pair again.'
+        "This browser is no longer paired with your NexusID app. " +
+          "Open the NexusID extension to pair again.",
+      );
+    }
+    if (response.status === 404) {
+      throw new Error(
+        "This page's verification session is not valid. Reload the page to try again.",
+      );
+    }
+    if (response.status === 410) {
+      throw new Error(
+        "This verification session has expired. Reload the page to start a new one.",
+      );
+    }
+    if (response.status === 409) {
+      throw new Error(
+        "This verification session was already used. Reload the page to start a new one.",
       );
     }
     throw new Error(`NexusID could not start verification: ${detail}`);
   }
 
-  // Backend responds with ApiResponse<{ requestId, status, expiresAt, ... }>.
-  backendRequestId = data && data.data && data.data.requestId;
-  if (!backendRequestId) {
-    throw new Error('NexusID backend response did not include a requestId');
+  // ApiResponse<{ requestId, pollSecret, verifierName, requestedFields, expiresAt }>
+  const relayed = data && data.data;
+  if (!relayed || !relayed.requestId || !relayed.pollSecret) {
+    throw new Error(
+      "NexusID backend response did not include a request ID and poll secret",
+    );
   }
 
-  console.log(`[NexusID] Backend acknowledged request. Polling id: ${backendRequestId}`);
+  console.log(
+    `[NexusID] Backend accepted relay. Polling id: ${relayed.requestId}`,
+  );
 
-  // Persist to chrome.storage.local so the popup and recovery logic can read it
+  // Persist so the popup and recovery logic can read it. The poll secret only
+  // reads this one request's outcome; it is removed with the entry.
   const entry = {
-    local_id:          request_id,
-    backend_id:        backendRequestId,
-    tab_id:            tabId,
-    verifier_id,
-    verifier_name:     verifier_name || verifier_id,
-    requested_fields:  Array.isArray(requested_fields) ? requested_fields : [requested_fields],
-    nonce,
-    callback_url:      callback_url || null,
-    page_url:          page_url || null,
-    // Needed to resume polling after the service worker restarts. The key is
-    // already public in the page's HTML snippet, so storing it adds no exposure.
-    api_key,
-    status:            'pending',
-    poll_attempts:     0,
-    created_at:        Date.now(),
-    updated_at:        Date.now(),
+    local_id: request_id,
+    backend_id: relayed.requestId,
+    tab_id: tabId,
+    verifier_name: relayed.verifierName,
+    requested_fields: relayed.requestedFields || [],
+    page_url,
+    poll_secret: relayed.pollSecret,
+    status: "pending",
+    poll_attempts: 0,
+    created_at: Date.now(),
+    updated_at: Date.now(),
   };
 
   await setStorageEntry(request_id, entry);
 
-  // Begin polling — non-blocking; runs via setInterval inside the service worker
-  startPolling(request_id, backendRequestId, tabId, api_key);
+  // Begin polling — non-blocking.
+  startPolling(request_id, relayed.requestId, tabId, relayed.pollSecret);
 
-  return { request_id };
+  return {
+    request_id,
+    verifier_name: relayed.verifierName,
+    requested_fields: relayed.requestedFields || [],
+  };
 }
 
 // ─── DEVICE PAIRING (SRS FR-031, FR-003; API-023, API-024) ───────────────────
@@ -256,7 +266,7 @@ async function handleVerificationRequest(request, tabId) {
  * The pairing token is this browser's credential for its pairing (SRS IF-005);
  * the backend stores only its hash.
  */
-const PAIRING_STORAGE_KEY = 'nexusid_pairing';
+const PAIRING_STORAGE_KEY = "nexusid_pairing";
 
 async function getPairing() {
   const result = await chrome.storage.local.get(PAIRING_STORAGE_KEY);
@@ -265,12 +275,12 @@ async function getPairing() {
   // Records written before the SRS route names: same values, old field names.
   if (!record.pairing_token && record.secret) {
     const migrated = {
-      challenge_id:  record.pairing_id,
+      challenge_id: record.pairing_id,
       pairing_token: record.secret,
-      status:        record.status,
-      expires_at:    record.expires_at,
-      paired_at:     record.paired_at,
-      qr_payload:    record.qr_payload,
+      status: record.status,
+      expires_at: record.expires_at,
+      paired_at: record.paired_at,
+      qr_payload: record.qr_payload,
     };
     await chrome.storage.local.set({ [PAIRING_STORAGE_KEY]: migrated });
     return migrated;
@@ -288,11 +298,11 @@ async function startPairing() {
     response = await fetchWithTimeout(
       `${BACKEND_URL}/qr-challenges`,
       {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ purpose: 'PAIRING' }),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purpose: "PAIRING" }),
       },
-      10000
+      10000,
     );
   } catch (err) {
     throw new Error(`Could not reach NexusID backend: ${err.message}`);
@@ -300,21 +310,23 @@ async function startPairing() {
 
   const json = await response.json().catch(() => null);
   if (!response.ok || !json || !json.data) {
-    throw new Error((json && json.error) || `Pairing failed (HTTP ${response.status})`);
+    throw new Error(
+      (json && json.error) || `Pairing failed (HTTP ${response.status})`,
+    );
   }
 
   const { challengeId, pairingToken, expiresAt, qrPayload } = json.data;
   const record = {
-    challenge_id:  challengeId,
+    challenge_id: challengeId,
     pairing_token: pairingToken,
-    status:        'pending',
-    expires_at:    expiresAt,
-    paired_at:     null,
-    qr_payload:    qrPayload,
+    status: "pending",
+    expires_at: expiresAt,
+    paired_at: null,
+    qr_payload: qrPayload,
   };
   await chrome.storage.local.set({ [PAIRING_STORAGE_KEY]: record });
 
-  return { status: 'pending', qr_payload: qrPayload, expires_at: expiresAt };
+  return { status: "pending", qr_payload: qrPayload, expires_at: expiresAt };
 }
 
 /**
@@ -325,14 +337,14 @@ async function startPairing() {
  */
 async function checkPairing() {
   const pairing = await getPairing();
-  if (!pairing) return { status: 'unpaired' };
+  if (!pairing) return { status: "unpaired" };
 
-  if (pairing.status === 'paired') {
-    return { status: 'paired', paired_at: pairing.paired_at };
+  if (pairing.status === "paired") {
+    return { status: "paired", paired_at: pairing.paired_at };
   }
 
   const pendingState = {
-    status: 'pending',
+    status: "pending",
     qr_payload: pairing.qr_payload,
     expires_at: pairing.expires_at,
   };
@@ -342,8 +354,8 @@ async function checkPairing() {
   try {
     response = await fetchWithTimeout(
       `${BACKEND_URL}/qr-challenges/${pairing.challenge_id}`,
-      { method: 'GET', headers: { 'x-pairing-token': pairing.pairing_token } },
-      8000
+      { method: "GET", headers: { "x-pairing-token": pairing.pairing_token } },
+      8000,
     );
   } catch (err) {
     // Transient — report the local state and let the popup retry.
@@ -352,31 +364,34 @@ async function checkPairing() {
 
   if (response.status === 404) {
     await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
-    return { status: 'unpaired' };
+    return { status: "unpaired" };
   }
 
   const json = await response.json().catch(() => null);
   const challenge = json && json.data;
   if (!response.ok || !challenge) return pendingState;
 
-  if (challenge.state === 'REDEEMED') {
+  if (challenge.state === "REDEEMED") {
     await chrome.storage.local.set({
       [PAIRING_STORAGE_KEY]: {
-        challenge_id:  pairing.challenge_id,
+        challenge_id: pairing.challenge_id,
         pairing_token: pairing.pairing_token,
-        status:        'paired',
-        expires_at:    pairing.expires_at,
-        paired_at:     challenge.redeemedAt,
+        status: "paired",
+        expires_at: pairing.expires_at,
+        paired_at: challenge.redeemedAt,
       },
     });
-    showBrowserNotification('Device paired', 'This browser is now linked to your NexusID app.');
-    return { status: 'paired', paired_at: challenge.redeemedAt };
+    showBrowserNotification(
+      "Device paired",
+      "This browser is now linked to your NexusID app.",
+    );
+    return { status: "paired", paired_at: challenge.redeemedAt };
   }
 
-  if (challenge.state === 'EXPIRED') {
+  if (challenge.state === "EXPIRED") {
     // BR-002 — the code can no longer be used; the popup offers a new one.
     await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
-    return { status: 'expired' };
+    return { status: "expired" };
   }
 
   return pendingState;
@@ -396,10 +411,12 @@ async function checkPairing() {
  * @param {string} localId     - Our local tracking ID (chrome.storage key)
  * @param {string} backendId   - The ID the backend uses for this request
  * @param {number|null} tabId  - Tab to notify on completion
- * @param {string} apiKey      - Service Provider API key (x-api-key header)
+ * @param {string} pollSecret  - Poll secret from the relay (x-poll-secret header, API-033)
  */
-function startPolling(localId, backendId, tabId, apiKey) {
-  console.log(`[NexusID] Starting polling for request ${backendId} (local: ${localId})`);
+function startPolling(localId, backendId, tabId, pollSecret) {
+  console.log(
+    `[NexusID] Starting polling for request ${backendId} (local: ${localId})`,
+  );
 
   // Store the interval ID in a module-level map so we can cancel it
   // (service worker memory — lost on termination, which is why we have recovery)
@@ -417,10 +434,12 @@ function startPolling(localId, backendId, tabId, apiKey) {
 
     // Hard stop — max attempts reached
     if (poll.attempts > MAX_POLL_ATTEMPTS) {
-      console.warn(`[NexusID] Max poll attempts reached for ${backendId}. Marking expired.`);
+      console.warn(
+        `[NexusID] Max poll attempts reached for ${backendId}. Marking expired.`,
+      );
       clearInterval(intervalId);
       activePolls.delete(localId);
-      await handleTerminalState(localId, tabId, 'expired');
+      await handleTerminalState(localId, tabId, "expired");
       return;
     }
 
@@ -429,34 +448,43 @@ function startPolling(localId, backendId, tabId, apiKey) {
     try {
       const response = await fetchWithTimeout(
         `${BACKEND_URL}/verification/request/${backendId}`,
-        { method: 'GET', headers: { 'x-api-key': apiKey } },
-        8000
+        { method: "GET", headers: { "x-poll-secret": pollSecret } },
+        8000,
       );
 
       if (!response.ok) {
-        // 401 means the API key is missing or invalid — retrying cannot help.
+        // 401 means the poll secret is missing — retrying cannot help.
         if (response.status === 401) {
-          console.warn(`[NexusID] Poll for ${backendId} rejected: invalid API key. Stopping poll.`);
+          console.warn(
+            `[NexusID] Poll for ${backendId} rejected: no poll secret. Stopping poll.`,
+          );
           clearInterval(intervalId);
           activePolls.delete(localId);
-          await updateStorageEntry(localId, { status: 'expired', updated_at: Date.now() });
+          await updateStorageEntry(localId, {
+            status: "expired",
+            updated_at: Date.now(),
+          });
           await notifyTab(tabId, {
-            type:       'VERIFICATION_ERROR',
+            type: "VERIFICATION_ERROR",
             request_id: localId,
-            error:      'This site\'s NexusID API key was rejected.',
+            error: "NexusID could not read the result of this request.",
           });
           return;
         }
         // 404 means the request was never found on the backend — treat as expired
         if (response.status === 404) {
-          console.warn(`[NexusID] Request ${backendId} not found on backend (404). Stopping poll.`);
+          console.warn(
+            `[NexusID] Request ${backendId} not found on backend (404). Stopping poll.`,
+          );
           clearInterval(intervalId);
           activePolls.delete(localId);
-          await handleTerminalState(localId, tabId, 'expired');
+          await handleTerminalState(localId, tabId, "expired");
           return;
         }
         // Other HTTP errors — log and keep polling (may be transient)
-        console.warn(`[NexusID] Poll got HTTP ${response.status} for ${backendId}. Continuing.`);
+        console.warn(
+          `[NexusID] Poll got HTTP ${response.status} for ${backendId}. Continuing.`,
+        );
         return;
       }
 
@@ -464,61 +492,62 @@ function startPolling(localId, backendId, tabId, apiKey) {
       data = json.data || json; // handle both ApiResponse<T> and raw shapes
     } catch (err) {
       // Network error — transient. Log and keep polling.
-      console.warn(`[NexusID] Network error polling ${backendId}:`, err.message);
+      console.warn(
+        `[NexusID] Network error polling ${backendId}:`,
+        err.message,
+      );
       return;
     }
 
     const status = data.status;
-    console.log(`[NexusID] Poll #${poll.attempts} for ${backendId}: status = ${status}`);
+    console.log(
+      `[NexusID] Poll #${poll.attempts} for ${backendId}: status = ${status}`,
+    );
 
-    if (status === 'completed') {
+    if (status === "completed") {
       clearInterval(intervalId);
       activePolls.delete(localId);
 
       // Backend PollResult uses camelCase: { status, verifiedFields, callbackUrl }
       const verifiedFields = data.verifiedFields || {};
-      const callbackUrl    = data.callbackUrl || null;
+      const callbackUrl = data.callbackUrl || null;
 
       // Update storage
       await updateStorageEntry(localId, {
-        status:          'completed',
+        status: "completed",
         verified_fields: verifiedFields,
-        callback_url:    callbackUrl,
-        updated_at:      Date.now(),
+        callback_url: callbackUrl,
+        updated_at: Date.now(),
       });
 
       // Notify the tab
       await notifyTab(tabId, {
-        type:            'VERIFICATION_COMPLETE',
-        request_id:      localId,
+        type: "VERIFICATION_COMPLETE",
+        request_id: localId,
         backend_request_id: backendId,
         verified_fields: verifiedFields,
-        callback_url:    callbackUrl,
+        callback_url: callbackUrl,
       });
 
       // Browser notification
       showBrowserNotification(
-        'Verification Complete',
-        'Your identity was verified successfully'
+        "Verification Complete",
+        "Your identity was verified successfully",
       );
 
       console.log(`[NexusID] Verification ${backendId} completed.`);
-
-    } else if (status === 'rejected') {
+    } else if (status === "rejected") {
       clearInterval(intervalId);
       activePolls.delete(localId);
-      await handleTerminalState(localId, tabId, 'rejected');
+      await handleTerminalState(localId, tabId, "rejected");
       console.log(`[NexusID] Verification ${backendId} rejected.`);
-
-    } else if (status === 'expired') {
+    } else if (status === "expired") {
       clearInterval(intervalId);
       activePolls.delete(localId);
-      await handleTerminalState(localId, tabId, 'expired');
+      await handleTerminalState(localId, tabId, "expired");
       console.log(`[NexusID] Verification ${backendId} expired (server-side).`);
-
     }
     // status === 'pending' → do nothing, keep polling
-
   }, POLL_INTERVAL_MS);
 
   // Store the interval ID so we can cancel from cancelVerification()
@@ -547,20 +576,26 @@ async function handleTerminalState(localId, tabId, state) {
   await updateStorageEntry(localId, { status: state, updated_at: Date.now() });
 
   const messageType =
-    state === 'rejected' ? 'VERIFICATION_REJECTED' : 'VERIFICATION_EXPIRED';
+    state === "rejected" ? "VERIFICATION_REJECTED" : "VERIFICATION_EXPIRED";
 
   // backend_request_id lets the site's server confirm the outcome (FR-017).
   const entry = await getStorageEntry(localId);
   await notifyTab(tabId, {
-    type:               messageType,
-    request_id:         localId,
+    type: messageType,
+    request_id: localId,
     backend_request_id: entry ? entry.backend_id : null,
   });
 
-  if (state === 'rejected') {
-    showBrowserNotification('Verification Rejected', 'The verification request was rejected.');
+  if (state === "rejected") {
+    showBrowserNotification(
+      "Verification Rejected",
+      "The verification request was rejected.",
+    );
   } else {
-    showBrowserNotification('Verification Expired', 'The verification request timed out.');
+    showBrowserNotification(
+      "Verification Expired",
+      "The verification request timed out.",
+    );
   }
 }
 
@@ -580,13 +615,19 @@ async function cancelVerification(requestId, tabId) {
   }
   activePolls.delete(requestId);
 
-  await updateStorageEntry(requestId, { status: 'expired', updated_at: Date.now() });
+  await updateStorageEntry(requestId, {
+    status: "expired",
+    updated_at: Date.now(),
+  });
 
   // Find the real tabId from storage if the caller (popup) doesn't have it
   const entry = await getStorageEntry(requestId);
   const targetTabId = tabId || (entry && entry.tab_id) || null;
 
-  await notifyTab(targetTabId, { type: 'VERIFICATION_EXPIRED', request_id: requestId });
+  await notifyTab(targetTabId, {
+    type: "VERIFICATION_EXPIRED",
+    request_id: requestId,
+  });
 
   console.log(`[NexusID] Verification ${requestId} cancelled by user.`);
 }
@@ -605,7 +646,7 @@ async function getActiveVerification() {
 
   for (const [key, entry] of Object.entries(all)) {
     if (!isVerificationEntry(entry)) continue;
-    if (entry.status === 'pending') {
+    if (entry.status === "pending") {
       if (!latest || entry.created_at > latest.created_at) {
         latest = { ...entry, local_id: key };
       }
@@ -638,21 +679,28 @@ async function getActiveVerification() {
  */
 function showBrowserNotification(title, message) {
   const notifId = `nexusid-${Date.now()}`;
-  chrome.notifications.create(notifId, {
-    type:    'basic',
-    iconUrl: NOTIFICATION_ICON,
-    title,
-    message,
-    priority: 2,
-  }, (id) => {
-    if (chrome.runtime.lastError) {
-      // Notification permission not granted — non-fatal
-      console.warn('[NexusID] Could not create notification:', chrome.runtime.lastError.message);
-    } else {
-      // Auto-clear after 8 seconds
-      setTimeout(() => chrome.notifications.clear(id, () => {}), 8000);
-    }
-  });
+  chrome.notifications.create(
+    notifId,
+    {
+      type: "basic",
+      iconUrl: NOTIFICATION_ICON,
+      title,
+      message,
+      priority: 2,
+    },
+    (id) => {
+      if (chrome.runtime.lastError) {
+        // Notification permission not granted — non-fatal
+        console.warn(
+          "[NexusID] Could not create notification:",
+          chrome.runtime.lastError.message,
+        );
+      } else {
+        // Auto-clear after 8 seconds
+        setTimeout(() => chrome.notifications.clear(id, () => {}), 8000);
+      }
+    },
+  );
 }
 
 // ─── TAB MESSAGING ────────────────────────────────────────────────────────────
@@ -666,7 +714,7 @@ function showBrowserNotification(title, message) {
  */
 async function notifyTab(tabId, message) {
   if (!tabId) {
-    console.warn('[NexusID] notifyTab called with null tabId — skipping.');
+    console.warn("[NexusID] notifyTab called with null tabId — skipping.");
     return;
   }
   try {
@@ -733,7 +781,9 @@ async function cleanupStaleEntries() {
 
   if (keysToRemove.length > 0) {
     await chrome.storage.local.remove(keysToRemove);
-    console.log(`[NexusID] Cleaned up ${keysToRemove.length} stale storage entries.`);
+    console.log(
+      `[NexusID] Cleaned up ${keysToRemove.length} stale storage entries.`,
+    );
   }
 }
 
@@ -748,12 +798,14 @@ async function recoverOrphanedRequests() {
 
   for (const [key, entry] of Object.entries(all)) {
     if (!isVerificationEntry(entry)) continue;
-    if (entry.status !== 'pending') continue;
+    if (entry.status !== "pending") continue;
 
     // If still within TTL, try to resume polling
     const age = now - entry.created_at;
     if (age < STORAGE_TTL_MS) {
-      console.log(`[NexusID] Recovering orphaned request ${key} (age: ${Math.round(age / 1000)}s)`);
+      console.log(
+        `[NexusID] Recovering orphaned request ${key} (age: ${Math.round(age / 1000)}s)`,
+      );
 
       // How many attempts have already elapsed?
       const elapsedAttempts = Math.floor(age / POLL_INTERVAL_MS);
@@ -761,16 +813,19 @@ async function recoverOrphanedRequests() {
 
       if (remainingAttempts <= 0) {
         // Already timed out — mark as expired
-        await updateStorageEntry(key, { status: 'expired', updated_at: now });
-        await notifyTab(entry.tab_id, { type: 'VERIFICATION_EXPIRED', request_id: key });
+        await updateStorageEntry(key, { status: "expired", updated_at: now });
+        await notifyTab(entry.tab_id, {
+          type: "VERIFICATION_EXPIRED",
+          request_id: key,
+        });
       } else {
         // Resume polling with reduced attempt budget
         activePolls.set(key, { attempts: elapsedAttempts });
-        startPolling(key, entry.backend_id, entry.tab_id, entry.api_key);
+        startPolling(key, entry.backend_id, entry.tab_id, entry.poll_secret);
       }
     } else {
       // Beyond TTL — mark as expired
-      await updateStorageEntry(key, { status: 'expired', updated_at: now });
+      await updateStorageEntry(key, { status: "expired", updated_at: now });
     }
   }
 }
@@ -787,11 +842,11 @@ async function recoverOrphanedRequests() {
 function isVerificationEntry(entry) {
   return (
     entry !== null &&
-    typeof entry === 'object' &&
-    typeof entry.local_id === 'string' &&
-    typeof entry.verifier_id === 'string' &&
-    typeof entry.created_at === 'number' &&
-    typeof entry.status === 'string'
+    typeof entry === "object" &&
+    typeof entry.local_id === "string" &&
+    typeof entry.backend_id === "string" &&
+    typeof entry.created_at === "number" &&
+    typeof entry.status === "string"
   );
 }
 
@@ -808,10 +863,13 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
     return response;
   } catch (err) {
-    if (err.name === 'AbortError') {
+    if (err.name === "AbortError") {
       throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
     }
     throw err;
@@ -826,8 +884,8 @@ async function fetchWithTimeout(url, options, timeoutMs) {
  * When the user clicks a NexusID notification, open the dashboard.
  */
 chrome.notifications.onClicked.addListener((notificationId) => {
-  if (notificationId.startsWith('nexusid-')) {
-    chrome.tabs.create({ url: 'http://localhost:3000/dashboard' });
+  if (notificationId.startsWith("nexusid-")) {
+    chrome.tabs.create({ url: "http://localhost:3000/dashboard" });
     chrome.notifications.clear(notificationId, () => {});
   }
 });

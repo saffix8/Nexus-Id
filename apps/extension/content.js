@@ -1,6 +1,14 @@
 /**
  * NexusID — Content Script
  * Detects <div id="nexusid-verify"> elements and orchestrates the verification flow.
+ *
+ * SRS FR-032: the Service Provider's server opens a session (API-030) and
+ * embeds only its session ID and single-use nonce in the page:
+ *   <div id="nexusid-verify" data-session-id="..." data-nonce="..."></div>
+ * This script hands those to the background worker, which relays them with
+ * the browser's pairing token (API-032). The SP's API key never reaches the
+ * browser, and the platform name and requested fields shown to the user come
+ * from the backend, not from the page.
  * Manifest V3 — vanilla JS, no imports, inline styles only.
  */
 
@@ -559,18 +567,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-/**
- * 128-bit random hex nonce. Uses getRandomValues, which (unlike randomUUID)
- * is available on non-secure-context pages too.
- */
-function generateNonce() {
-  var bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.prototype.map.call(bytes, function(b) {
-    return ('0' + b.toString(16)).slice(-2);
-  }).join('');
-}
-
 function formatFieldName(field) {
   return field.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
 }
@@ -591,49 +587,28 @@ function processElement(el) {
   if (el.dataset[PROCESSED_FLAG]) return;
   el.dataset[PROCESSED_FLAG] = 'true';
 
-  // ── Validate attributes ──────────────────────────────────────────────────
-  // data-api-key is the Service Provider's key (SRS FR-034). The backend
-  // identifies the verifier from it; data-verifier-id/-name are display only.
-  var apiKey       = (el.dataset.apiKey        || '').trim();
-  var verifierId   = (el.dataset.verifierId    || '').trim() || window.location.hostname || 'unknown-site';
-  var verifierName = (el.dataset.verifierName  || '').trim();
-  var fieldsRaw    = (el.dataset.fields        || '').trim();
-  var pageNonce    = (el.dataset.nonce         || '').trim();
-  var callbackUrl  = (el.dataset.callbackUrl   || '').trim();
+  // ── Validate attributes (FR-032) ─────────────────────────────────────
+  var sessionId = (el.dataset.sessionId || '').trim();
+  var nonce     = (el.dataset.nonce     || '').trim();
 
   var missing = [];
-  if (!apiKey)      missing.push('data-api-key');
-  if (!fieldsRaw)   missing.push('data-fields');
-  if (pageNonce && pageNonce.length < 8) missing.push('data-nonce (at least 8 characters)');
+  if (!sessionId) missing.push('data-session-id');
+  if (!nonce)     missing.push('data-nonce');
 
   if (missing.length > 0) {
     replaceContent(el, buildValidationErrorUI(missing));
     return;
   }
 
-  // ── Challenge nonce (SRS 3.3: the extension generates a unique nonce) ────
-  // A page-supplied nonce is used once; nonces are single-use on the backend,
-  // so a retry (or a page without data-nonce) gets a freshly generated one.
-  var nonce = (pageNonce && el._nexusidUsedNonce !== pageNonce)
-    ? pageNonce
-    : generateNonce();
-  el._nexusidUsedNonce = nonce;
-
-  var requestedFields = fieldsRaw.split(',').map(function(f) { return f.trim(); }).filter(Boolean);
-
-  // ── Inject pending UI immediately ────────────────────────────────────────
-  replaceContent(el, buildPendingUI(verifierName || verifierId, requestedFields));
+  // ── Inject pending UI immediately; details arrive from the backend ───────
+  replaceContent(el, buildPendingUI('', []));
 
   // ── Send to background ───────────────────────────────────────────────────
   var message = {
-    type:             'VERIFICATION_REQUEST_DETECTED',
-    verifier_id:      verifierId,
-    verifier_name:    verifierName || verifierId,
-    requested_fields: requestedFields,
-    nonce:            nonce,
-    callback_url:     callbackUrl || null,
-    page_url:         window.location.href,
-    api_key:          apiKey,
+    type:       'VERIFICATION_REQUEST_DETECTED',
+    session_id: sessionId,
+    nonce:      nonce,
+    page_url:   window.location.href,
   };
 
   try {
@@ -649,8 +624,12 @@ function processElement(el) {
 
       if (!response.success) {
         replaceContent(el, buildErrorUI(response.error));
+        notifyPage(el, { status: 'error', requestId: sessionId, error: response.error });
         return;
       }
+
+      // Show who is asking and for what — as recorded by the backend.
+      replaceContent(el, buildPendingUI(response.verifier_name, response.requested_fields));
 
       // Store the request_id → element mapping for incoming messages
       if (response.request_id) {
@@ -663,13 +642,10 @@ function processElement(el) {
   }
 
   // ── Expose a retry function on the element ───────────────────────────────
+  // A session is single-use (BR-005), so retrying means asking the site's
+  // server for a new one — i.e. reloading the page.
   el._nexusidRetry = function() {
-    // Clear processed flag and re-run
-    delete el.dataset[PROCESSED_FLAG];
-    Object.keys(activeRequests).forEach(function(id) {
-      if (activeRequests[id] === el) { delete activeRequests[id]; }
-    });
-    processElement(el);
+    window.location.reload();
   };
 }
 
@@ -682,13 +658,13 @@ function processElement(el) {
  *
  *   document.addEventListener('nexusid:result', e => {
  *     // e.detail = { status: 'completed'|'rejected'|'expired'|'error',
- *     //              requestId?: string,  // confirm server-side with your API key
+ *     //              requestId?: string,  // = the session ID
  *     //              verifiedFields?: {...}, error?: string }
  *   });
  *
- * The site's backend should still confirm via
- * GET /api/v1/verification/request/:id with its API key — page events are
- * not a trust anchor.
+ * The site's backend must still confirm via API-031
+ * GET /api/v1/verification/sessions/:id/outcome with its API key — page
+ * events are not a trust anchor.
  */
 function notifyPage(el, detail) {
   try {

@@ -171,6 +171,7 @@ export default function ProviderRegisterPage() {
               )}
 
               <form
+                method="post"
                 onSubmit={handleSubmit(onSubmit)}
                 noValidate
                 className="space-y-5"

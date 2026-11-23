@@ -23,21 +23,42 @@ type Loaded =
   | { kind: "ready"; payload: ScannedChallenge }
   | { kind: "declined" };
 
-/** Reads the scanned code from the URL fragment, or from storage after login. */
-function takePendingPairing(): ScannedChallenge | null {
-  let stored: string | null = null;
-  try {
-    stored = window.sessionStorage.getItem(PENDING_PAIRING_KEY);
-    window.sessionStorage.removeItem(PENDING_PAIRING_KEY);
-  } catch {
-    // Storage unavailable; fall back to the fragment alone.
+/**
+ * Reads the scanned code from the URL fragment, or from storage after login.
+ * Idempotent on purpose: React runs effects twice in development, so reading
+ * must not consume anything. The fragment is moved into storage and stripped
+ * from the address bar; storage is cleared once the user approves or declines.
+ */
+function readPendingPairing(): ScannedChallenge | null {
+  const fragment = window.location.hash.slice(1);
+  const fromHash = parsePairingFragment(fragment);
+
+  if (fromHash) {
+    try {
+      window.sessionStorage.setItem(PENDING_PAIRING_KEY, fragment);
+    } catch {
+      // Storage unavailable; keep the fragment so a re-run still finds it.
+      return fromHash;
+    }
+    // Drop the one-time code from the address bar and history.
+    window.history.replaceState(null, "", window.location.pathname);
+    return fromHash;
   }
 
-  const fromHash = parsePairingFragment(window.location.hash);
-  // Drop the one-time code from the address bar and history.
-  window.history.replaceState(null, "", window.location.pathname);
+  try {
+    const stored = window.sessionStorage.getItem(PENDING_PAIRING_KEY);
+    return stored ? parsePairingFragment(stored) : null;
+  } catch {
+    return null;
+  }
+}
 
-  return fromHash ?? (stored ? parsePairingFragment(stored) : null);
+function clearPendingPairing(): void {
+  try {
+    window.sessionStorage.removeItem(PENDING_PAIRING_KEY);
+  } catch {
+    // Nothing stored.
+  }
 }
 
 export default function ApprovePairingPage() {
@@ -45,14 +66,16 @@ export default function ApprovePairingPage() {
   const [state, setState] = useState<Loaded>({ kind: "loading" });
 
   useEffect(() => {
-    const payload = takePendingPairing();
+    const payload = readPendingPairing();
     setState(payload ? { kind: "ready", payload } : { kind: "missing" });
   }, []);
 
   const mutation = useMutation({
     mutationFn: redeemPairingChallenge,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["pairing-devices"] }),
+    onSuccess: () => {
+      clearPendingPairing();
+      queryClient.invalidateQueries({ queryKey: ["pairing-devices"] });
+    },
   });
 
   return (
@@ -149,7 +172,10 @@ export default function ApprovePairingPage() {
                 {mutation.isPending ? "Pairing…" : "Approve"}
               </button>
               <button
-                onClick={() => setState({ kind: "declined" })}
+                onClick={() => {
+                  clearPendingPairing();
+                  setState({ kind: "declined" });
+                }}
                 disabled={mutation.isPending}
                 className="flex-1 px-4 py-2 rounded-lg text-sm border border-[#252C3D] text-[#8B92A8] transition-colors hover:text-[#EEF0F6] disabled:opacity-50"
               >

@@ -108,11 +108,13 @@ function showState(name) {
 
 /**
  * Render the PENDING state UI from a stored verification record.
- * @param {{ verifier_id: string, verifier_name: string, requested_fields: string[], request_id: string }} record
+ * @param {{ verifier_name: string, requested_fields: string[], page_url?: string, verifier_id?: string }} record
  */
 function renderPending(record) {
   pendingVerifierName.textContent   = record.verifier_name || record.verifier_id || 'Unknown Verifier';
-  pendingVerifierDomain.textContent = record.verifier_id   || '';
+  let pageHost = '';
+  try { pageHost = record.page_url ? new URL(record.page_url).host : ''; } catch { pageHost = ''; }
+  pendingVerifierDomain.textContent = pageHost || record.verifier_id || '';
 
   // Build fields list
   pendingFieldsList.innerHTML = '';

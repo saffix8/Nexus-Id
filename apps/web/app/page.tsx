@@ -801,13 +801,11 @@ function CredentialSourcesSection() {
 
 // ─── Section: For Verifiers ───────────────────────────────────────────────────
 
-const CODE_SNIPPET = `<!-- Add to your page where you want verification -->
+const CODE_SNIPPET = `<!-- Your server opens a session with your API key, then renders: -->
 <div
   id="nexusid-verify"
-  data-api-key="YOUR_API_KEY"
-  data-verifier-id="yourcompany.com"
-  data-verifier-name="Your Company"
-  data-fields="degree_title,university"
+  data-session-id="{{sessionId}}"
+  data-nonce="{{nonce}}"
 >
 </div>`;
 
@@ -825,7 +823,7 @@ function VerifiersSection() {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/(id|data-api-key|data-verifier-id|data-verifier-name|data-fields)=/g, '<span style="color:#38BDF8">$1</span>=')
+    .replace(/(id|data-session-id|data-nonce)=/g, '<span style="color:#38BDF8">$1</span>=')
     .replace(/(&lt;div|&lt;\/div&gt;)/g, '<span style="color:#8B5CF6">$1</span>')
     .replace(/"(.*?)"/g, '<span style="color:#22C55E">"$1"</span>')
     .replace(/(#.*)/g, '<span style="color:#525A72">$1</span>');

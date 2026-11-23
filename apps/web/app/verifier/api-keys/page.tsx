@@ -147,12 +147,10 @@ export default function ApiKeysPage() {
 
       <div className="space-y-3">
         <h2 className="text-sm font-semibold text-[#EEF0F6]">
-          Embed on your page
+          Use it on your server
         </h2>
         <VerifierIntegrationCode
           apiKey={issued?.apiKey ?? "YOUR_API_KEY"}
-          verifierId={profile.domain}
-          verifierName={profile.displayName}
           fields={["degree_title", "university"]}
         />
       </div>

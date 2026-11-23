@@ -86,6 +86,7 @@ let verificationRequestId: string;
 let testNonce: string;
 
 let pairingToken: string; // extension pairing token of the test user (SRS IF-005)
+let verificationPollSecret: string; // extension poll secret for verificationRequestId (API-033)
 
 const TEST_API_KEY = "integration-test-api-key";
 const OTHER_API_KEY = "integration-test-other-api-key";
@@ -150,6 +151,43 @@ afterAll(async () => {
 // Helper to get the FCM spy
 function getFCMSpy() {
   return notificationService.sendVerificationRequest as jest.Mock;
+}
+
+const DEFAULT_PAGE_URL = "https://test-company.nexusid.com/apply";
+
+/** API-030: the Service Provider's server opens a session (backend makes the nonce). */
+async function openSession(
+  requestedFields: string[],
+  extra: { callbackUrl?: string } = {},
+): Promise<{ sessionId: string; nonce: string; expiresAt: string }> {
+  const res = await request(app)
+    .post("/api/v1/verification/sessions")
+    .set("x-api-key", TEST_API_KEY)
+    .send({ requestedFields, ...extra })
+    .expect(201);
+  return res.body.data;
+}
+
+/** API-032: the paired extension relays a session it found on a page. */
+function relay(sessionId: string, nonce: string, pageUrl = DEFAULT_PAGE_URL) {
+  return request(app)
+    .post("/api/v1/verification/request")
+    .set("x-pairing-token", pairingToken)
+    .send({ sessionId, nonce, pageUrl });
+}
+
+/** API-030 then API-032: a request routed to the paired test user. */
+async function openRelayedRequest(
+  requestedFields: string[],
+  pageUrl = DEFAULT_PAGE_URL,
+): Promise<{ requestId: string; nonce: string; pollSecret: string }> {
+  const session = await openSession(requestedFields);
+  const res = await relay(session.sessionId, session.nonce, pageUrl).expect(200);
+  return {
+    requestId: res.body.data.requestId,
+    nonce: session.nonce,
+    pollSecret: res.body.data.pollSecret,
+  };
 }
 
 // ─── Test 1: User Registration ────────────────────────────────────────────────
@@ -302,17 +340,9 @@ describe("Test 1b — Device pairing", () => {
       .expect(404);
   });
 
-  it("refuses an unpaired browser's verification request — 409", async () => {
-    const res = await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: generateNonce(),
-        pageUrl: "https://test-company.nexusid.com/apply",
-      })
-      .expect(409);
+  it("refuses an unpaired browser's relay — 409", async () => {
+    const session = await openSession(["degree_title"]);
+    const res = await relay(session.sessionId, session.nonce).expect(409);
     expect(res.body.error).toMatch(/not paired/i);
   });
 
@@ -439,38 +469,80 @@ describe("Test 1b — Device pairing", () => {
   });
 });
 
-// ─── Test 2: Verification Request Creation ────────────────────────────────────
+// ─── Test 2: Session creation (API-030) and relay (API-032) ──────────────────
 
-describe("Test 2 — Verification request creation", () => {
+describe("Test 2 — Verification session and relay", () => {
+  let sessionId: string;
+
   beforeAll(() => {
-    // Reset FCM spy call count before this block
     getFCMSpy().mockClear();
   });
 
-  it("creates a pending verification request and returns requestId", async () => {
-    testNonce = generateNonce();
+  it("requires the Service Provider's API key to open a session — 401", async () => {
+    await request(app)
+      .post("/api/v1/verification/sessions")
+      .send({ requestedFields: ["degree_title"] })
+      .expect(401);
+  });
 
+  it("opens a session with a backend-generated nonce and a 120 s window — API-030", async () => {
     const res = await request(app)
-      .post("/api/v1/verification/request")
+      .post("/api/v1/verification/sessions")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title", "university"],
-        nonce: testNonce,
-        pageUrl: "https://test-company.nexusid.com/apply",
         callbackUrl: "https://test-company.nexusid.com/verify/callback",
       })
+      .expect("Content-Type", /json/)
+      .expect(201);
+
+    expect(res.body.success).toBe(true);
+    sessionId = res.body.data.sessionId;
+    testNonce = res.body.data.nonce;
+    expect(typeof sessionId).toBe("string");
+    expect(testNonce.length).toBeGreaterThanOrEqual(32);
+
+    const windowMs = new Date(res.body.data.expiresAt).getTime() - Date.now();
+    expect(windowMs).toBeGreaterThan(110_000);
+    expect(windowMs).toBeLessThanOrEqual(120_000);
+
+    // Nothing is routed until the extension relays it.
+    const dbReq = await prisma.verificationRequest.findUnique({ where: { id: sessionId } });
+    expect(dbReq!.status).toBe("pending");
+    expect(dbReq!.userId).toBeNull();
+    expect(getFCMSpy()).not.toHaveBeenCalled();
+  });
+
+  it("gives every session a different nonce (FR-043 AC4)", async () => {
+    const other = await openSession(["degree_title"]);
+    expect(other.nonce).not.toBe(testNonce);
+  });
+
+  it("refuses a relay with the wrong nonce, and sends nothing — 404 (FR-032 AC3)", async () => {
+    await relay(sessionId, "not-the-nonce-0000000000").expect(404);
+    expect(getFCMSpy()).not.toHaveBeenCalled();
+  });
+
+  it("refuses a relay for an unknown session — 404", async () => {
+    await relay("00000000-0000-0000-0000-000000000000", testNonce).expect(404);
+  });
+
+  it("relays the session to the paired user without an API key — API-032", async () => {
+    const res = await relay(sessionId, testNonce)
       .expect("Content-Type", /json/)
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(typeof res.body.data.requestId).toBe("string");
-    expect(res.body.data.status).toBe("queued");
+    expect(res.body.data.requestId).toBe(sessionId);
+    expect(res.body.data.verifierName).toBe("NexusID Test Verifier");
+    expect(res.body.data.requestedFields).toEqual(["degree_title", "university"]);
+    expect(typeof res.body.data.pollSecret).toBe("string");
 
     verificationRequestId = res.body.data.requestId;
+    verificationPollSecret = res.body.data.pollSecret;
   });
 
-  it("stores the request in the DB with status = pending", async () => {
+  it("stores the routed request with only a hash of the poll secret", async () => {
     const dbReq = await prisma.verificationRequest.findUnique({
       where: { id: verificationRequestId },
     });
@@ -479,22 +551,20 @@ describe("Test 2 — Verification request creation", () => {
     expect(dbReq!.status).toBe("pending");
     expect(dbReq!.nonce).toBe(testNonce);
     expect(dbReq!.userId).toBe(testUserId);
-    expect(dbReq!.requestedFields).toContain("degree_title");
-    expect(dbReq!.requestedFields).toContain("university");
-    expect(new Date(dbReq!.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(dbReq!.relayedAt).not.toBeNull();
+    expect(dbReq!.pageUrl).toBe(DEFAULT_PAGE_URL);
+    expect(dbReq!.pollSecretHash).toBeTruthy();
+    expect(dbReq!.pollSecretHash).not.toBe(verificationPollSecret);
+    expect(dbReq!.requestedFields).toEqual(["degree_title", "university"]);
   });
 
-  it("called the FCM notification service at least once", () => {
+  it("notified the paired device once (FR-019)", () => {
     expect(getFCMSpy()).toHaveBeenCalledTimes(1);
 
     const call = getFCMSpy().mock.calls[0][0] as {
       push_token: string;
       verification_request_id: string;
-      verifier_id: string;
-      verifier_name: string;
-      requested_fields: string[];
       nonce: string;
-      expires_at: string;
     };
 
     expect(call.verification_request_id).toBe(verificationRequestId);
@@ -502,17 +572,24 @@ describe("Test 2 — Verification request creation", () => {
     expect(call.push_token).toBe("test-fcm-token-abc123");
   });
 
-  it("rejects duplicate nonce — 400", async () => {
-    await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: testNonce, // same nonce
-        pageUrl: "https://test-company.nexusid.com/apply",
-      })
-      .expect(400);
+  it("refuses to relay the same session twice — 409", async () => {
+    await relay(sessionId, testNonce).expect(409);
+    expect(getFCMSpy()).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to relay an expired session — 410 (FR-024)", async () => {
+    const stale = await openSession(["degree_title"]);
+    await prisma.verificationRequest.update({
+      where: { id: stale.sessionId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    await relay(stale.sessionId, stale.nonce).expect(410);
+    const dbReq = await prisma.verificationRequest.findUnique({
+      where: { id: stale.sessionId },
+    });
+    expect(dbReq!.status).toBe("expired");
+    expect(dbReq!.userId).toBeNull();
   });
 });
 
@@ -559,13 +636,13 @@ describe("Test 3 — Valid proof submission", () => {
   });
 });
 
-// ─── Test 4: Extension Polling ────────────────────────────────────────────────
+// ─── Test 4: Outcome — extension poll (API-033) and Service Provider (API-031) ─
 
-describe("Test 4 — Extension polling for completed result", () => {
-  it("returns completed status with verifiedFields when polled", async () => {
+describe("Test 4 — Reading the outcome", () => {
+  it("returns completed to the extension with its poll secret — API-033", async () => {
     const res = await request(app)
       .get(`/api/v1/verification/request/${verificationRequestId}`)
-      .set("x-api-key", TEST_API_KEY)
+      .set("x-poll-secret", verificationPollSecret)
       .expect("Content-Type", /json/)
       .expect(200);
 
@@ -579,9 +656,41 @@ describe("Test 4 — Extension polling for completed result", () => {
     );
   });
 
-  it("returns 404 for a non-existent request id", async () => {
+  it("returns the same outcome to the Service Provider's server — API-031", async () => {
+    const res = await request(app)
+      .get(`/api/v1/verification/sessions/${verificationRequestId}/outcome`)
+      .set("x-api-key", TEST_API_KEY)
+      .expect(200);
+
+    expect(res.body.data.status).toBe("completed");
+    expect(res.body.data.verifiedFields).toMatchObject({
+      degree_title: "BS Computer Science",
+    });
+  });
+
+  it("requires the poll secret — 401", async () => {
     await request(app)
-      .get("/api/v1/verification/request/00000000-0000-0000-0000-000000000000")
+      .get(`/api/v1/verification/request/${verificationRequestId}`)
+      .expect(401);
+  });
+
+  it("hides the request from a wrong poll secret — 404", async () => {
+    await request(app)
+      .get(`/api/v1/verification/request/${verificationRequestId}`)
+      .set("x-poll-secret", "wrong-secret")
+      .expect(404);
+  });
+
+  it("no longer accepts the API key for the extension poll — 401", async () => {
+    await request(app)
+      .get(`/api/v1/verification/request/${verificationRequestId}`)
+      .set("x-api-key", TEST_API_KEY)
+      .expect(401);
+  });
+
+  it("returns 404 for a non-existent session outcome", async () => {
+    await request(app)
+      .get("/api/v1/verification/sessions/00000000-0000-0000-0000-000000000000/outcome")
       .set("x-api-key", TEST_API_KEY)
       .expect(404);
   });
@@ -596,20 +705,12 @@ describe("Test 5 — Replay attack rejected", () => {
 
   beforeAll(async () => {
     // Create a fresh request for the replay scenario
-    replayNonce = generateNonce();
-
-    const createRes = await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: replayNonce,
-        pageUrl: "https://test-company.nexusid.com/replay-test",
-      })
-      .expect(200);
-
-    replayRequestId = createRes.body.data.requestId;
+    const relayed = await openRelayedRequest(
+      ["degree_title"],
+      "https://test-company.nexusid.com/replay-test",
+    );
+    replayRequestId = relayed.requestId;
+    replayNonce = relayed.nonce;
 
     // Build the proof once
     replayProof = await generateTestProof(testCredential, userKeys.privateKey, {
@@ -659,20 +760,12 @@ describe("Test 6 — Tampered proof rejected", () => {
   let tamperedNonce: string;
 
   beforeAll(async () => {
-    tamperedNonce = generateNonce();
-
-    const createRes = await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title", "university"],
-        nonce: tamperedNonce,
-        pageUrl: "https://test-company.nexusid.com/tamper-test",
-      })
-      .expect(200);
-
-    tamperedRequestId = createRes.body.data.requestId;
+    const relayed = await openRelayedRequest(
+      ["degree_title", "university"],
+      "https://test-company.nexusid.com/tamper-test",
+    );
+    tamperedRequestId = relayed.requestId;
+    tamperedNonce = relayed.nonce;
   });
 
   it("rejects a proof with a corrupted sd_jwt (signature verification fails)", async () => {
@@ -807,6 +900,7 @@ describe("Test 6 — Tampered proof rejected", () => {
 describe("Test 7 — Expired request rejected", () => {
   let expiredRequestId: string;
   let expiredNonce: string;
+  const expiredPollSecret = "expired-test-poll-secret";
 
   beforeAll(async () => {
     expiredNonce = generateNonce();
@@ -818,6 +912,10 @@ describe("Test 7 — Expired request rejected", () => {
         requestedFields: ["degree_title"],
         nonce: expiredNonce,
         pageUrl: "https://test-company.nexusid.com/expired-test",
+        // Already relayed to the test user before it ran out.
+        userId: testUserId,
+        relayedAt: new Date(Date.now() - 11 * 60 * 1000),
+        pollSecretHash: hashApiKey(expiredPollSecret), // same SHA-256 helper
         status: "pending",
         // 10 minutes in the past
         expiresAt: new Date(Date.now() - 10 * 60 * 1000),
@@ -830,7 +928,7 @@ describe("Test 7 — Expired request rejected", () => {
   it("returns expired status when polling an expired request", async () => {
     const res = await request(app)
       .get(`/api/v1/verification/request/${expiredRequestId}`)
-      .set("x-api-key", TEST_API_KEY)
+      .set("x-poll-secret", expiredPollSecret)
       .expect(200);
 
     expect(res.body.data.status).toBe("expired");
@@ -866,22 +964,15 @@ describe("Test 7 — Expired request rejected", () => {
 
 describe("Test 8 — User rejects a verification request", () => {
   let rejectableRequestId: string;
+  let rejectablePollSecret: string;
 
   beforeAll(async () => {
-    const nonce = generateNonce();
-
-    const res = await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title"],
-        nonce,
-        pageUrl: "https://test-company.nexusid.com/reject-test",
-      })
-      .expect(200);
-
-    rejectableRequestId = res.body.data.requestId;
+    const relayed = await openRelayedRequest(
+      ["degree_title"],
+      "https://test-company.nexusid.com/reject-test",
+    );
+    rejectableRequestId = relayed.requestId;
+    rejectablePollSecret = relayed.pollSecret;
   });
 
   it("marks request as rejected when user rejects", async () => {
@@ -896,7 +987,7 @@ describe("Test 8 — User rejects a verification request", () => {
   it("polling reflects rejected status", async () => {
     const res = await request(app)
       .get(`/api/v1/verification/request/${rejectableRequestId}`)
-      .set("x-api-key", TEST_API_KEY)
+      .set("x-poll-secret", rejectablePollSecret)
       .expect(200);
 
     expect(res.body.data.status).toBe("rejected");
@@ -970,52 +1061,34 @@ describe("Test 10 — Verification history", () => {
   });
 });
 
-// ─── Test 11: Service Provider API key (SRS FR-034) ─────────────────────────
+// ─── Test 11: Service Provider API key (SRS FR-034, API-030/031) ────────────
 
 describe("Test 11 — Service Provider API key", () => {
-  it("rejects request creation without an API key — 401", async () => {
+  it("rejects session creation with an unknown API key — 401", async () => {
     await request(app)
-      .post("/api/v1/verification/request")
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: generateNonce(),
-        pageUrl: "https://test-company.nexusid.com/apply",
-      })
-      .expect(401);
-  });
-
-  it("rejects request creation with an unknown API key — 401", async () => {
-    await request(app)
-      .post("/api/v1/verification/request")
+      .post("/api/v1/verification/sessions")
       .set("x-api-key", "not-a-real-key")
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: generateNonce(),
-        pageUrl: "https://test-company.nexusid.com/apply",
-      })
+      .send({ requestedFields: ["degree_title"] })
       .expect(401);
   });
 
   it("records the verifier from the API key, not the request body", async () => {
     const res = await request(app)
-      .post("/api/v1/verification/request")
+      .post("/api/v1/verification/sessions")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
       .send({
         verifierId: "00000000-0000-0000-0000-000000000000",
         requestedFields: ["degree_title"],
-        nonce: generateNonce(),
-        pageUrl: "https://test-company.nexusid.com/apply",
       })
-      .expect(200);
+      .expect(201);
 
     const dbReq = await prisma.verificationRequest.findUnique({
-      where: { id: res.body.data.requestId },
+      where: { id: res.body.data.sessionId },
     });
     expect(dbReq!.verifierId).toBe(testVerifierId);
   });
 
-  it("hides a request from a different verifier — 404", async () => {
+  it("hides a session from a different verifier — 404", async () => {
     await prisma.verifier.create({
       data: {
         domain: "other-company.nexusid.com",
@@ -1026,14 +1099,14 @@ describe("Test 11 — Service Provider API key", () => {
     });
 
     await request(app)
-      .get(`/api/v1/verification/request/${verificationRequestId}`)
+      .get(`/api/v1/verification/sessions/${verificationRequestId}/outcome`)
       .set("x-api-key", OTHER_API_KEY)
       .expect(404);
   });
 
-  it("rejects polling without an API key — 401", async () => {
+  it("rejects reading an outcome without an API key — 401", async () => {
     await request(app)
-      .get(`/api/v1/verification/request/${verificationRequestId}`)
+      .get(`/api/v1/verification/sessions/${verificationRequestId}/outcome`)
       .expect(401);
   });
 });
@@ -1068,17 +1141,7 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .expect(200);
     otherToken = login.body.data.token;
 
-    const created = await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: generateNonce(),
-        pageUrl: "https://test-company.nexusid.com/apply",
-      })
-      .expect(200);
-    requestId = created.body.data.requestId;
+    requestId = (await openRelayedRequest(["degree_title"])).requestId;
   });
 
   it("lists the request as pending for the paired user only", async () => {
@@ -1198,16 +1261,8 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .set("Authorization", `Bearer ${authToken}`)
       .expect(200);
 
-    await request(app)
-      .post("/api/v1/verification/request")
-      .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-token", pairingToken)
-      .send({
-        requestedFields: ["degree_title"],
-        nonce: generateNonce(),
-        pageUrl: "https://test-company.nexusid.com/apply",
-      })
-      .expect(409);
+    const session = await openSession(["degree_title"]);
+    await relay(session.sessionId, session.nonce).expect(409);
   });
 });
 

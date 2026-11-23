@@ -62,34 +62,39 @@ const FIELD_GROUPS: FieldGroup[] = [
 // stored only as a hash (FR-034), so providers paste their own.
 const API_KEY_PLACEHOLDER = 'YOUR_API_KEY';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-
-// The NexusID browser extension detects this element, authenticates with
-// data-api-key, and generates a fresh single-use nonce per request — so the
-// snippet carries no nonce and needs no script tag.
-function buildSnippet(
-  domain: string,
-  displayName: string,
-  fields: string[],
-  apiKey: string,
-  callbackUrl: string
-): string {
-  const lines = [
+// SRS flow: the provider's SERVER opens a session with its API key (API-030,
+// FR-043) and the page carries only the session ID and single-use nonce, which
+// the NexusID extension relays with its pairing token (API-032, FR-032).
+function buildSnippet(fields: string[], apiKey: string, callbackUrl: string): string {
+  const body = JSON.stringify(
+    callbackUrl ? { requestedFields: fields, callbackUrl } : { requestedFields: fields },
+  );
+  return [
+    `// 1. On your server: open a session (API-030). Never put the key in a page.`,
+    `POST ${API_BASE}/verification/sessions`,
+    `x-api-key: ${apiKey}`,
+    body,
+    `// → { "sessionId": "…", "nonce": "…", "expiresAt": "…" }  (valid 120 s)`,
+    ``,
+    `<!-- 2. In the page: only the session ID and nonce -->`,
     `<div`,
     `  id="nexusid-verify"`,
-    `  data-api-key="${apiKey}"`,
-    `  data-verifier-id="${domain}"`,
-    `  data-verifier-name="${displayName}"`,
-    `  data-fields="${fields.join(',')}"`,
-    callbackUrl ? `  data-callback-url="${callbackUrl}"` : null,
-    `>`,
-    `  <!-- Detected by the NexusID browser extension -->`,
-    `</div>`,
-  ]
-    .filter((l) => l !== null)
-    .join('\n');
-  return lines;
+    `  data-session-id="{{sessionId}}"`,
+    `  data-nonce="{{nonce}}"`,
+    `></div>`,
+    ``,
+    `// 3. On your server: read the outcome (API-031)`,
+    `GET ${API_BASE}/verification/sessions/{sessionId}/outcome`,
+    `x-api-key: ${apiKey}`,
+  ].join('\n');
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -173,7 +178,7 @@ export default function CreateRequestPage() {
   }, []);
 
   const fieldsArray = Array.from(selectedFields);
-  const snippet = buildSnippet(domain, displayName, fieldsArray, API_KEY_PLACEHOLDER, callbackUrl);
+  const snippet = buildSnippet(fieldsArray, API_KEY_PLACEHOLDER, callbackUrl);
 
   return (
     <div className="max-w-6xl">
@@ -324,7 +329,7 @@ export default function CreateRequestPage() {
                 <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]/60" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]/60" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#22C55E]/60" />
-                <span className="ml-2 text-[10px] font-mono text-[#525A72]">integration.html</span>
+                <span className="ml-2 text-[10px] font-mono text-[#525A72]">integration</span>
               </div>
               <pre className="text-xs font-mono leading-relaxed whitespace-pre text-[#EEF0F6]">
                 <CodeHighlight snippet={snippet} />
@@ -429,9 +434,9 @@ export default function CreateRequestPage() {
               <li>
                 Generate a key on{' '}
                 <Link href="/verifier/api-keys" className="text-[#3B6FE8] hover:text-[#4A7EF7]">API Keys</Link>{' '}
-                and put it in <code className="text-[#EEF0F6]">data-api-key</code>.
+                and use it on your server to open a session (step 1). Never put the key in a page.
               </li>
-              <li>Paste the snippet into a page and open it in Chrome with the NexusID extension installed and paired.</li>
+              <li>Render the session ID and nonce into your page (step 2) and open it in Chrome with the NexusID extension installed and paired.</li>
               <li>Approve on the paired device — the result appears on the page and in your Overview.</li>
             </ol>
 
@@ -468,7 +473,8 @@ function SectionNumberBadge({ n, label }: { n: number; label?: string }) {
 
 function CodeHighlight({ snippet }: { snippet: string }) {
   // Colorise the HTML snippet with simple token rules
-  const lines = snippet.split('\n');
+  // Escape first: callbackUrl and field names come from user input.
+  const lines = escapeHtml(snippet).split('\n');
   return (
     <>
       {lines.map((line, i) => {
@@ -485,7 +491,8 @@ function CodeHighlight({ snippet }: { snippet: string }) {
           // tags
           .replace(/(&lt;|<)(\/?)(\w+)/g, `<span style="color:#EEF0F6">$1$2</span><span style="color:#3B6FE8">$3</span>`)
           // comments
-          .replace(/(&lt;!--|<!--)(.*?)(--&gt;|-->)/g, `<span style="color:#525A72">&lt;!--$2--&gt;</span>`);
+          .replace(/(&lt;!--|<!--)(.*?)(--&gt;|-->)/g, `<span style="color:#525A72">&lt;!--$2--&gt;</span>`)
+          .replace(/^(\/\/.*)$/, `<span style="color:#525A72">$1</span>`);
 
         return (
           <span key={i}>

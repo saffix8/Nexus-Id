@@ -63,7 +63,7 @@ interface AnalyticsData {
   recent: RecentVerification[];
 }
 
-// ── Mock data (replaces API until backend is live) ────────────────────────────
+// ── Analytics computed from the real request log ─────────────────────────────
 
 const DAY_MS = 86_400_000;
 

@@ -1,83 +1,189 @@
-# NexusID
+# NexusID — Claude Code Project Context
 
-Privacy-preserving digital identity verification platform. SD-JWT (IETF RFC 9901)
-selective disclosure: users prove specific claims (degree, age, enrollment,
-employment) without exposing full documents. Final year project, Air University
-Islamabad. Must run end-to-end for the FYP defense.
+> Privacy-preserving SD-JWT digital identity platform. FYP — Air University Islamabad.
+> Student: Muhammad Safi Ur Rehman (231987)
 
-## Monorepo map
+---
 
-npm workspaces: apps/*, packages/*, services/*.
+## Quick Reference
 
-| Path | What it is | Port |
-| --- | --- | --- |
-| packages/sd-jwt | @nexusid/sd-jwt — issuer.ts, holder.ts, verifier.ts | — |
-| packages/types | @nexusid/types — shared types, single source of truth | — |
-| services/backend | Express + Prisma + PostgreSQL API | 4000 |
-| services/issuer-nadra | NADRA Verisys issuer | 4001 |
-| services/issuer-hec | HEC degree issuer | 4002 |
-| services/issuer-au | Air University enrollment issuer | 4003 |
-| services/issuer-linkedin | LinkedIn employment issuer (OAuth) | 4004 |
-| services/ml | Python/scikit-learn fraud detection (Flask) | 5001 |
-| apps/web | Next.js 14 App Router (user + verifier portals) | 3000 |
-| apps/mobile | React Native holder wallet | — |
-| apps/extension | Chrome Manifest V3 extension | — |
-| infra/ | Docker Compose, nginx, Dockerfiles | — |
+| What | Value |
+|------|-------|
+| Backend | `http://localhost:4000` |
+| Web portal | `http://localhost:3000` |
+| Postgres | Docker container `nexusid-postgres`, port 5432 |
+| DB name | `nexusid` |
 
-Reference docs, read on demand:
+---
+
+## Monorepo Structure
+
+```
+nexusid/                          ← npm workspace root
+├── apps/
+│   ├── web/                      ← Next.js 14 App Router (:3000)
+│   ├── mobile/                   ← React Native Android wallet
+│   └── extension/                ← Chrome MV3 extension
+├── packages/
+│   ├── sd-jwt/                   ← @nexusid/sd-jwt (issuer/holder/verifier exports)
+│   └── types/                    ← @nexusid/types (shared TypeScript types)
+├── services/
+│   ├── backend/                  ← Express API (:4000)
+│   │   └── prisma/
+│   │       └── schema.prisma     ← ALWAYS pass --schema=services/backend/prisma/schema.prisma
+│   ├── issuers/
+│   │   ├── nadra/                ← NADRA Verisys issuer (:4001)
+│   │   ├── hec/                  ← HEC degree issuer (:4002)
+│   │   ├── air-university/       ← Air University enrollment issuer (:4003)
+│   │   └── linkedin/             ← LinkedIn employment issuer OAuth (:4004)
+│   └── ml/                       ← Python/Flask ML service (:5001)
+├── infra/
+│   └── docker-compose.yml        ← All services + postgres + nginx
+├── docs/
+│   ├── SRS.md                    ← Full SRS Version 2.0 (source of truth)
+│   └── REQUIREMENTS.md           ← Condensed FR/API/algorithm reference ← IMPORT THIS
+└── CLAUDE.md                     ← This file
+```
+
+---
+
+## Context Files — Always Read
+
+```
 @docs/REQUIREMENTS.md
+```
 
-## Commands
+The REQUIREMENTS.md file contains:
+- All 45 FRs (FR-001–FR-045) with acceptance criteria
+- All 51 API routes (API-001–API-051) with methods and paths
+- 9 algorithms (ALG-001–ALG-009)
+- 9 predicate claim codes (AGE_OVER_18 … EMPLOYMENT_ACTIVE)
+- Business rules (BR-001–BR-024)
+- Timing constants (QR TTL, challenge TTL, proof age limit)
 
-    npm run dev -w services/backend                   # tsx watch
-    npm test -w services/backend                      # jest + ts-jest + supertest
-    npx prisma migrate dev --name <name> -w services/backend
-    npx prisma generate -w services/backend
-    npx tsc --noEmit -p services/backend
-    npm run dev -w apps/web                           # Next.js dev server
+For deep detail on any requirement, refer to `docs/SRS.md` (full 200-page SRS).
 
-## How we work together
+---
 
-- Paste evidence first. If something fails, paste the exact terminal output or
-  stack trace. Never describe it from memory.
-- No writes without approval. Confirm the exact diff or complete replacement
-  file before applying. If a patch has been tried three or more times, switch
-  to /safe-replace.
-- Never rewrite working code unnecessarily. Never duplicate authentication logic.
-- One scoped change at a time. Backend auth and web auth are separate flows;
-  do not touch both in the same change unless I explicitly asked.
+## Common Commands
 
-## Code conventions
+```bash
+# Install all workspace packages
+npm install
 
-- TypeScript strict mode everywhere. No `any`, no `@ts-ignore`.
-- Zod v4 for all validation. `.parse()` throws; `.safeParse()` returns a result.
-  Never use `zodResolver` — @hookform/resolvers is incompatible with Zod v4.
-- Prisma accessors are singular camelCase: `prisma.user`, `prisma.credential`.
-- Multi-table writes use `prisma.$transaction()`.
-- Errors go through the typed error hierarchy and middleware. No bare throws in route handlers.
+# Start all services (run from repo root)
+bash dev-start.sh
 
-## Hard-won knowledge (do not undo these)
+# Individual services
+npm run dev --workspace=services/backend
+npm run dev --workspace=apps/web
+npm run dev --workspace=services/issuers/nadra
 
-- Zod v4: `.string().email()` not `.string().email({ message: ... })` — the
-  object-arg overload does not exist in v4.
-- `zodResolver` is incompatible with Zod v4. Use manual `safeParse` + `setError`.
-- Prisma accessors are singular camelCase only. `prisma.users` will throw at runtime.
-- `sd_hash` trailing `~` is correct per RFC 9901 §6.2. Do not remove it.
-- Do not touch `auth.controller.ts` and `web-auth.controller.ts` in the same
-  change — they are separate auth flows by design.
-- The mobile private key never leaves Android Keystore. All signing through
-  `CryptoService`. Never pass a PEM anywhere.
-- `react-native-biometrics` returns the public key only once — cache it via
-  `StorageService` in the same function that creates the key.
-- Blockchain audit writes are fail-silent by design. Revocation check is
-  fail-open by design. These are intentional, not bugs.
-- zk-SNARK (Groth16) is non-fatal: if `snarkjs` is unavailable, skip and log.
-- Always check for stale Docker containers squatting a port before assuming the
-  service is broken: `lsof -i :4000`.
+# TypeScript check
+npx tsc --noEmit
 
-## Out of bounds
+# Tests
+npm test --workspace=services/backend
+npm test --workspace=packages/sd-jwt
 
-- NEVER run `prisma migrate reset` or `prisma db push --force-reset`.
-- NEVER read, print or log `.env*`, `*.pem`, `*.jwk`, or `*.keystore` files.
-- NEVER commit or push unless I explicitly ask.
-- NEVER export a private key from Android Keystore.
+# Prisma (ALWAYS use --schema flag)
+npx prisma generate --schema=services/backend/prisma/schema.prisma
+npx prisma migrate status --schema=services/backend/prisma/schema.prisma
+npx prisma migrate dev --schema=services/backend/prisma/schema.prisma --name <migration_name>
+npx prisma studio --schema=services/backend/prisma/schema.prisma
+
+# Docker
+docker ps
+docker start nexusid-postgres
+docker compose -f infra/docker-compose.yml up -d
+docker compose -f infra/docker-compose.yml ps
+```
+
+---
+
+## Hard-Won Knowledge
+
+### Postgres
+- Runs in Docker container named `nexusid-postgres` on port 5432
+- Check health: `docker ps --filter name=nexusid-postgres --format "{{.Status}}"`
+- NOT a system postgresql service — do not use `pg_isready` or `postgresql.service`
+- If container is stopped: `docker start nexusid-postgres`
+
+### Prisma
+- Schema is at `services/backend/prisma/schema.prisma` — NOT at repo root
+- Every prisma CLI command MUST include `--schema=services/backend/prisma/schema.prisma`
+- Running without `--schema` will silently use a wrong path
+
+### SD-JWT Package
+- Three named exports: `@nexusid/sd-jwt/issuer`, `@nexusid/sd-jwt/holder`, `@nexusid/sd-jwt/verifier`
+- Uses SHA-256 digests and RSA-2048 signatures (CON-007, CON-008)
+- Proof generation (ALG-001) MUST happen on device — private key never leaves Android Keystore
+
+### Issuer Services
+- Each issuer exposes `GET /.well-known/jwks.json` for public key
+- Each issuer exposes `POST /api/v1/credentials/{type}/reverify` for account recovery
+- NADRA uses 2-step: `POST /verify` → OTP → `POST /verify-otp`
+- AU issuer rate-limited: 5 requests/minute per IP
+
+### Next.js / Web Portal
+- App Router (Next.js 14) — no Pages Router
+- Zod v4 is installed; `zodResolver` from `@hookform/resolvers/zod` requires Zod v3 API — use `z.object()` not `z.strictObject()` if resolver errors appear
+- Auth flow: NextAuth session cookie → API proxy routes (`/api/auth?action=login`)
+
+### Docker Compose
+- File is at `infra/docker-compose.yml` — NOT at repo root
+- Use `docker compose -f infra/docker-compose.yml` for all compose commands
+
+---
+
+## Architecture Summary
+
+```
+[Android Wallet] ←push→ [Backend :4000] ←── [Chrome Extension :content-script]
+       │                       │                        │
+       │ SD-JWT proof          │ Prisma/PostgreSQL       │ Pairing token
+       │                       │                        │
+   [packages/sd-jwt]    [services/backend]       [apps/extension]
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+             [issuers/:4001–4004]   [apps/web :3000]
+                    │
+              [services/ml :5001]
+```
+
+**Key flows:**
+1. **Pairing**: Extension generates QR (FR-031) → mobile scans → pairing stored in backend
+2. **Verification**: SP creates session (API-030) → extension detects request (FR-032) → mobile notified (FR-019) → user approves (FR-021) → proof generated ON DEVICE (ALG-001) → submitted to backend (API-035) → backend verifies (ALG-002) → outcome available (API-031)
+3. **Issuance**: Mobile submits attributes (FR-006) → issuer validates → issues SD-JWT credential (FR-007) → stored encrypted on device
+
+---
+
+## OUT OF BOUNDS
+
+**NEVER** do any of the following, even if asked:
+
+- Run `prisma migrate reset` or `prisma db push --force-reset`
+- Read, print, or log `.env*`, `*.pem`, `*.jwk`, or `*.keystore` files
+- Commit or push to git unless explicitly asked
+- Export the private key from Android Keystore
+- Run `rm -rf` on any directory
+- Run `git push`, `git reset --hard`, `git clean -f`
+- Run `docker system prune` or `docker volume prune`
+
+---
+
+## FYP Evaluation Target (60% — 2 weeks)
+
+**Must work for demo:**
+- [ ] Mobile: Registration + device key + pairing QR (FR-001–FR-003)
+- [ ] Mobile: Credential wallet + at least 1 issuer (FR-006–FR-010)
+- [ ] Mobile: Full verification flow — notification → approve → proof → result (FR-019–FR-027)
+- [ ] Extension: QR pairing + request detection + result display (FR-031–FR-034)
+- [ ] Portal: SP registration + API key + verification session creation (FR-039–FR-043, FR-045)
+- [ ] Backend: All verification endpoints working end-to-end
+
+**Nice to have:**
+- History (FR-028–FR-030)
+- Account recovery (FR-037)
+- ML service wired to issuers (services/ml)

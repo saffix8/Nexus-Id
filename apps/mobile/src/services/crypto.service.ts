@@ -121,6 +121,29 @@ class CryptoService {
     this.keystoreService = KeystoreService.getInstance();
   }
 
+  // ── 0. signQrChallenge (SRS API-025, ALG-007) ──────────────────────────────
+
+  /**
+   * Signs a scanned pairing QR challenge with the hardware-backed device key
+   * (biometric prompt), proving to the backend that this registered device
+   * redeemed it. The key never leaves Android Keystore (CON-008, BR-017).
+   *
+   * The signed string must match qrChallengeSigningInput in
+   * services/backend/src/services/qr-challenge.service.ts.
+   *
+   * @returns Base64 RSA-SHA256 signature.
+   */
+  async signQrChallenge(userId: string, challengeId: string, code: string): Promise<string> {
+    try {
+      return await this.keystoreService.signData(
+        userId,
+        `nexusid-qr:PAIRING:${challengeId}:${code}`,
+      );
+    } catch (err) {
+      throw new SigningError(err);
+    }
+  }
+
   // ── 1. generateProofForVerification ────────────────────────────────────────
 
   /**

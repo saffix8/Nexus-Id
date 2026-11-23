@@ -1,13 +1,13 @@
 "use client";
 
-// Paired browsers (SRS FR-032) and the web stand-in for device pairing
-// (SRS UC-002 / FR-003). The SRS has the mobile app scan the extension's QR;
+// Paired browsers (SRS FR-038) and the web stand-in for device pairing
+// (SRS FR-003, API-025). The SRS has the mobile app scan the extension's QR;
 // until the mobile app is runnable, the signed-in web user can paste the
-// extension's pairing code here instead. Both call POST /pairing/claim.
+// extension's pairing code here instead. Both redeem via API-025 (POST /qr-challenges/redeem), signed with the device key.
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { z } from "zod";
+import { parsePairingInput, redeemPairingChallenge } from "@/lib/pairing";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,16 +21,6 @@ interface PairedDevice {
 interface PairFormValues {
   pairingCode: string;
 }
-
-// Exact payload the extension encodes into its QR / copies to the clipboard.
-const PairingPayloadSchema = z.object({
-  v: z.literal(1),
-  type: z.literal("nexusid-pair"),
-  pairingId: z.string().uuid(),
-  code: z.string().min(1),
-});
-
-type PairingPayload = z.infer<typeof PairingPayloadSchema>;
 
 const DEVICES_KEY = ["pairing-devices"] as const;
 
@@ -47,7 +37,7 @@ async function readJson(
 }
 
 async function fetchDevices(): Promise<PairedDevice[]> {
-  const res = await fetch("/api/v1/pairing/devices", {
+  const res = await fetch("/api/v1/pairings", {
     credentials: "include",
   });
   const json = await readJson(res);
@@ -57,21 +47,8 @@ async function fetchDevices(): Promise<PairedDevice[]> {
   return json.data as PairedDevice[];
 }
 
-async function claimPairing(payload: PairingPayload): Promise<void> {
-  const res = await fetch("/api/v1/pairing/claim", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pairingId: payload.pairingId, code: payload.code }),
-  });
-  const json = await readJson(res);
-  if (!res.ok || !json.success) {
-    throw new Error(json.error ?? "Pairing failed");
-  }
-}
-
 async function revokePairing(pairingId: string): Promise<void> {
-  const res = await fetch(`/api/v1/pairing/devices/${pairingId}`, {
+  const res = await fetch(`/api/v1/pairings/${pairingId}`, {
     method: "DELETE",
     credentials: "include",
   });
@@ -94,17 +71,6 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
-function parsePairingCode(raw: string): PairingPayload | null {
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(raw.trim());
-  } catch {
-    return null;
-  }
-  const parsed = PairingPayloadSchema.safeParse(decoded);
-  return parsed.success ? parsed.data : null;
-}
-
 // ── Components ────────────────────────────────────────────────────────────────
 
 function PairBrowserCard() {
@@ -118,7 +84,7 @@ function PairBrowserCard() {
   } = useForm<PairFormValues>({ defaultValues: { pairingCode: "" } });
 
   const mutation = useMutation({
-    mutationFn: claimPairing,
+    mutationFn: redeemPairingChallenge,
     onSuccess: () => {
       reset();
       queryClient.invalidateQueries({ queryKey: DEVICES_KEY });
@@ -129,7 +95,7 @@ function PairBrowserCard() {
   });
 
   function onSubmit(values: PairFormValues) {
-    const payload = parsePairingCode(values.pairingCode);
+    const payload = parsePairingInput(values.pairingCode);
     if (!payload) {
       setError("pairingCode", {
         message:
@@ -144,11 +110,12 @@ function PairBrowserCard() {
     <div className="bg-[#13161E] border border-[#1E2330] rounded-xl p-6">
       <h2 className="text-sm font-semibold text-[#EEF0F6]">Pair a browser</h2>
       <p className="text-xs text-[#8B92A8] mt-1 mb-4 max-w-xl">
-        Open the NexusID extension, choose{" "}
-        <span className="text-[#EEF0F6]">Pair device</span>, then{" "}
+        Open the NexusID extension and choose{" "}
+        <span className="text-[#EEF0F6]">Pair device</span>. Scan the QR with
+        your phone camera to approve there, or choose{" "}
         <span className="text-[#EEF0F6]">Copy code instead</span> and paste it
         here. Verification requests from that browser will then be routed to
-        your account. The code expires after 5 minutes.
+        your account. The code expires after 2 minutes.
       </p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
@@ -158,7 +125,7 @@ function PairBrowserCard() {
           })}
           rows={3}
           spellCheck={false}
-          placeholder='{"v":1,"type":"nexusid-pair",...}'
+          placeholder="http://…/pair#p=…&c=…"
           className="w-full rounded-lg bg-[#0C0E13] border border-[#252C3D] px-3 py-2 text-xs text-[#EEF0F6] placeholder:text-[#525A72] focus:outline-none focus:border-[#3B6FE8]"
           style={{ fontFamily: "JetBrains Mono, monospace" }}
         />

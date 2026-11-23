@@ -33,8 +33,8 @@ export interface CreateRequestParams {
   nonce: string;
   callbackUrl?: string;
   pageUrl: string;
-  /** Secret of the extension's device pairing (x-pairing-secret header). */
-  pairingSecret: string;
+  /** The extension's pairing token (x-pairing-token header, SRS IF-005). */
+  pairingToken: string;
 }
 
 export interface CreateRequestResult {
@@ -160,13 +160,13 @@ export class VerificationService {
       nonce,
       callbackUrl,
       pageUrl,
-      pairingSecret,
+      pairingToken,
     } = params;
 
     // 0. Route to the End User this extension is paired with (SRS FR-003).
     // An unpaired or revoked browser has no device to send the request to.
-    const userId = pairingSecret
-      ? await pairingService.resolvePairedUser(pairingSecret)
+    const userId = pairingToken
+      ? await pairingService.resolvePairedUser(pairingToken)
       : null;
 
     if (!userId) {

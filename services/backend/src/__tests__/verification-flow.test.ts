@@ -46,10 +46,11 @@ import {
 
 import type { SDJWTCredential } from "@nexusid/types";
 import { SignJWT, importPKCS8 } from "jose";
-import { createHash, randomUUID } from "crypto";
+import { createHash, createSign, randomUUID } from "crypto";
 
 /** Same hashing the backend applies to stored API keys (FR-034). */
-const hashApiKey = (key: string) => createHash("sha256").update(key, "utf8").digest("hex");
+const hashApiKey = (key: string) =>
+  createHash("sha256").update(key, "utf8").digest("hex");
 
 // ─── FCM mock ────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ let testCredential: SDJWTCredential;
 let verificationRequestId: string;
 let testNonce: string;
 
-let pairingSecret: string; // extension secret of the test user's device pairing
+let pairingToken: string; // extension pairing token of the test user (SRS IF-005)
 
 const TEST_API_KEY = "integration-test-api-key";
 const OTHER_API_KEY = "integration-test-other-api-key";
@@ -226,44 +227,78 @@ describe("Test 1 — User registration", () => {
   });
 });
 
-// ─── Test 1b: Device pairing (SRS UC-002, FR-003) ────────────────────────────
+// ─── Test 1b: Device pairing via QR challenge (SRS FR-003, FR-031, API-023–027) ─
+
+/**
+ * What the device signs to redeem a challenge (ALG-007). Written out here on
+ * purpose: it is the contract the mobile app and web portal implement too.
+ */
+function signQrChallenge(
+  challengeId: string,
+  code: string,
+  privateKeyPem: string,
+): string {
+  const signer = createSign("SHA256");
+  signer.update(`nexusid-qr:PAIRING:${challengeId}:${code}`, "utf8");
+  return signer.sign(privateKeyPem, "base64");
+}
 
 describe("Test 1b — Device pairing", () => {
-  let pairingId: string;
+  let challengeId: string;
   let code: string;
 
-  it("creates a pending pairing session with a QR payload", async () => {
-    const res = await request(app).post("/api/v1/pairing/sessions").expect(201);
+  it("creates a PAIRING QR challenge with a web-portal QR payload — API-023", async () => {
+    const res = await request(app)
+      .post("/api/v1/qr-challenges")
+      .send({ purpose: "PAIRING" })
+      .expect(201);
 
     expect(res.body.success).toBe(true);
-    pairingId = res.body.data.pairingId;
+    expect(res.body.data.purpose).toBe("PAIRING");
+    challengeId = res.body.data.challengeId;
     code = res.body.data.code;
-    pairingSecret = res.body.data.secret;
+    pairingToken = res.body.data.pairingToken;
 
-    expect(JSON.parse(res.body.data.qrPayload)).toEqual({
-      v: 1,
-      type: "nexusid-pair",
-      pairingId,
-      code,
-    });
+    // QR validity window is 120 s (BR-022).
+    const ttlMs = new Date(res.body.data.expiresAt).getTime() - Date.now();
+    expect(ttlMs).toBeGreaterThan(110_000);
+    expect(ttlMs).toBeLessThanOrEqual(120_000);
+
+    // QR is a web-portal link carrying the challenge in its fragment.
+    const qr = new URL(res.body.data.qrPayload);
+    expect(qr.pathname).toBe("/pair");
+    expect(qr.search).toBe("");
+    const fragment = new URLSearchParams(qr.hash.slice(1));
+    expect(fragment.get("p")).toBe(challengeId);
+    expect(fragment.get("c")).toBe(code);
+
     // Only hashes are persisted.
-    const row = await prisma.devicePairing.findUnique({ where: { id: pairingId } });
+    const row = await prisma.devicePairing.findUnique({
+      where: { id: challengeId },
+    });
     expect(row!.codeHash).not.toBe(code);
-    expect(row!.secretHash).not.toBe(pairingSecret);
+    expect(row!.secretHash).not.toBe(pairingToken);
   });
 
-  it("reports pending to the extension holding the secret", async () => {
-    const res = await request(app)
-      .get(`/api/v1/pairing/sessions/${pairingId}`)
-      .set("x-pairing-secret", pairingSecret)
-      .expect(200);
-    expect(res.body.data.status).toBe("pending");
-  });
-
-  it("hides the session from a wrong secret — 404", async () => {
+  it("rejects an unknown purpose — 400", async () => {
     await request(app)
-      .get(`/api/v1/pairing/sessions/${pairingId}`)
-      .set("x-pairing-secret", "wrong-secret")
+      .post("/api/v1/qr-challenges")
+      .send({ purpose: "SOMETHING_ELSE" })
+      .expect(400);
+  });
+
+  it("reports PENDING to the extension holding the pairing token — API-024", async () => {
+    const res = await request(app)
+      .get(`/api/v1/qr-challenges/${challengeId}`)
+      .set("x-pairing-token", pairingToken)
+      .expect(200);
+    expect(res.body.data.state).toBe("PENDING");
+  });
+
+  it("hides the challenge from a wrong pairing token — 404", async () => {
+    await request(app)
+      .get(`/api/v1/qr-challenges/${challengeId}`)
+      .set("x-pairing-token", "wrong-token")
       .expect(404);
   });
 
@@ -271,7 +306,7 @@ describe("Test 1b — Device pairing", () => {
     const res = await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title"],
         nonce: generateNonce(),
@@ -281,71 +316,125 @@ describe("Test 1b — Device pairing", () => {
     expect(res.body.error).toMatch(/not paired/i);
   });
 
-  it("requires a signed-in user to claim — 401", async () => {
+  it("requires a signed-in device to redeem — 401", async () => {
     await request(app)
-      .post("/api/v1/pairing/claim")
-      .send({ pairingId, code })
+      .post("/api/v1/qr-challenges/redeem")
+      .send({
+        challengeId,
+        code,
+        signature: signQrChallenge(challengeId, code, userKeys.privateKey),
+      })
       .expect(401);
   });
 
-  it("rejects a wrong code — 400", async () => {
+  it("requires a device signature — 400", async () => {
     await request(app)
-      .post("/api/v1/pairing/claim")
+      .post("/api/v1/qr-challenges/redeem")
       .set("Authorization", `Bearer ${authToken}`)
-      .send({ pairingId, code: "not-the-code" })
+      .send({ challengeId, code })
       .expect(400);
   });
 
-  it("pairs the device when the mobile app claims the code", async () => {
-    const res = await request(app)
-      .post("/api/v1/pairing/claim")
+  it("rejects a wrong code — 400 (ALG-006)", async () => {
+    await request(app)
+      .post("/api/v1/qr-challenges/redeem")
       .set("Authorization", `Bearer ${authToken}`)
-      .send({ pairingId, code })
-      .expect(200);
-    expect(res.body.data.status).toBe("paired");
-
-    const poll = await request(app)
-      .get(`/api/v1/pairing/sessions/${pairingId}`)
-      .set("x-pairing-secret", pairingSecret)
-      .expect(200);
-    expect(poll.body.data.status).toBe("paired");
+      .send({
+        challengeId,
+        code: "not-the-code",
+        signature: signQrChallenge(challengeId, "not-the-code", userKeys.privateKey),
+      })
+      .expect(400);
   });
 
-  it("refuses to reuse a claimed code — 409", async () => {
-    await request(app)
-      .post("/api/v1/pairing/claim")
+  it("rejects a signature from a key that is not the account's device key — 401 (ALG-007)", async () => {
+    const res = await request(app)
+      .post("/api/v1/qr-challenges/redeem")
       .set("Authorization", `Bearer ${authToken}`)
-      .send({ pairingId, code })
+      .send({
+        challengeId,
+        code,
+        signature: signQrChallenge(challengeId, code, issuerKeys.privateKey),
+      })
+      .expect(401);
+    expect(res.body.error).toMatch(/signature/i);
+
+    // The failed attempt did not use up the code.
+    const poll = await request(app)
+      .get(`/api/v1/qr-challenges/${challengeId}`)
+      .set("x-pairing-token", pairingToken)
+      .expect(200);
+    expect(poll.body.data.state).toBe("PENDING");
+  });
+
+  it("pairs the browser when the device redeems with a valid signature — API-025", async () => {
+    const res = await request(app)
+      .post("/api/v1/qr-challenges/redeem")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        challengeId,
+        code,
+        signature: signQrChallenge(challengeId, code, userKeys.privateKey),
+      })
+      .expect(200);
+    expect(res.body.data.state).toBe("REDEEMED");
+
+    const poll = await request(app)
+      .get(`/api/v1/qr-challenges/${challengeId}`)
+      .set("x-pairing-token", pairingToken)
+      .expect(200);
+    expect(poll.body.data.state).toBe("REDEEMED");
+    expect(poll.body.data.redeemedAt).not.toBeNull();
+  });
+
+  it("refuses to reuse a redeemed code — 409 (BR-002)", async () => {
+    await request(app)
+      .post("/api/v1/qr-challenges/redeem")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        challengeId,
+        code,
+        signature: signQrChallenge(challengeId, code, userKeys.privateKey),
+      })
       .expect(409);
   });
 
   it("refuses an expired code — 410 (BR-002)", async () => {
-    const created = await request(app).post("/api/v1/pairing/sessions").expect(201);
+    const created = await request(app)
+      .post("/api/v1/qr-challenges")
+      .send({ purpose: "PAIRING" })
+      .expect(201);
+    const expiredId = created.body.data.challengeId as string;
+    const expiredCode = created.body.data.code as string;
     await prisma.devicePairing.update({
-      where: { id: created.body.data.pairingId },
+      where: { id: expiredId },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
     await request(app)
-      .post("/api/v1/pairing/claim")
+      .post("/api/v1/qr-challenges/redeem")
       .set("Authorization", `Bearer ${authToken}`)
-      .send({ pairingId: created.body.data.pairingId, code: created.body.data.code })
+      .send({
+        challengeId: expiredId,
+        code: expiredCode,
+        signature: signQrChallenge(expiredId, expiredCode, userKeys.privateKey),
+      })
       .expect(410);
 
     const poll = await request(app)
-      .get(`/api/v1/pairing/sessions/${created.body.data.pairingId}`)
-      .set("x-pairing-secret", created.body.data.secret)
+      .get(`/api/v1/qr-challenges/${expiredId}`)
+      .set("x-pairing-token", created.body.data.pairingToken)
       .expect(200);
-    expect(poll.body.data.status).toBe("expired");
+    expect(poll.body.data.state).toBe("EXPIRED");
   });
 
-  it("lists the paired browser for the user", async () => {
+  it("lists the paired browser for the user — API-026", async () => {
     const res = await request(app)
-      .get("/api/v1/pairing/devices")
+      .get("/api/v1/pairings")
       .set("Authorization", `Bearer ${authToken}`)
       .expect(200);
     expect(res.body.data).toEqual([
-      expect.objectContaining({ pairingId, status: "paired" }),
+      expect.objectContaining({ pairingId: challengeId, status: "paired" }),
     ]);
   });
 });
@@ -364,7 +453,7 @@ describe("Test 2 — Verification request creation", () => {
     const res = await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title", "university"],
         nonce: testNonce,
@@ -417,7 +506,7 @@ describe("Test 2 — Verification request creation", () => {
     await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title"],
         nonce: testNonce, // same nonce
@@ -512,7 +601,7 @@ describe("Test 5 — Replay attack rejected", () => {
     const createRes = await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title"],
         nonce: replayNonce,
@@ -575,7 +664,7 @@ describe("Test 6 — Tampered proof rejected", () => {
     const createRes = await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title", "university"],
         nonce: tamperedNonce,
@@ -784,7 +873,7 @@ describe("Test 8 — User rejects a verification request", () => {
     const res = await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title"],
         nonce,
@@ -883,40 +972,40 @@ describe("Test 10 — Verification history", () => {
 
 // ─── Test 11: Service Provider API key (SRS FR-034) ─────────────────────────
 
-describe('Test 11 — Service Provider API key', () => {
-  it('rejects request creation without an API key — 401', async () => {
+describe("Test 11 — Service Provider API key", () => {
+  it("rejects request creation without an API key — 401", async () => {
     await request(app)
-      .post('/api/v1/verification/request')
+      .post("/api/v1/verification/request")
       .send({
-        requestedFields: ['degree_title'],
-        nonce:           generateNonce(),
-        pageUrl:         'https://test-company.nexusid.com/apply',
+        requestedFields: ["degree_title"],
+        nonce: generateNonce(),
+        pageUrl: "https://test-company.nexusid.com/apply",
       })
       .expect(401);
   });
 
-  it('rejects request creation with an unknown API key — 401', async () => {
+  it("rejects request creation with an unknown API key — 401", async () => {
     await request(app)
-      .post('/api/v1/verification/request')
-      .set('x-api-key', 'not-a-real-key')
+      .post("/api/v1/verification/request")
+      .set("x-api-key", "not-a-real-key")
       .send({
-        requestedFields: ['degree_title'],
-        nonce:           generateNonce(),
-        pageUrl:         'https://test-company.nexusid.com/apply',
+        requestedFields: ["degree_title"],
+        nonce: generateNonce(),
+        pageUrl: "https://test-company.nexusid.com/apply",
       })
       .expect(401);
   });
 
-  it('records the verifier from the API key, not the request body', async () => {
+  it("records the verifier from the API key, not the request body", async () => {
     const res = await request(app)
-      .post('/api/v1/verification/request')
-      .set('x-api-key', TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .post("/api/v1/verification/request")
+      .set("x-api-key", TEST_API_KEY)
+      .set("x-pairing-token", pairingToken)
       .send({
-        verifierId:      '00000000-0000-0000-0000-000000000000',
-        requestedFields: ['degree_title'],
-        nonce:           generateNonce(),
-        pageUrl:         'https://test-company.nexusid.com/apply',
+        verifierId: "00000000-0000-0000-0000-000000000000",
+        requestedFields: ["degree_title"],
+        nonce: generateNonce(),
+        pageUrl: "https://test-company.nexusid.com/apply",
       })
       .expect(200);
 
@@ -926,23 +1015,23 @@ describe('Test 11 — Service Provider API key', () => {
     expect(dbReq!.verifierId).toBe(testVerifierId);
   });
 
-  it('hides a request from a different verifier — 404', async () => {
+  it("hides a request from a different verifier — 404", async () => {
     await prisma.verifier.create({
       data: {
-        domain:      'other-company.nexusid.com',
-        displayName: 'Other Verifier',
-        apiKey:      hashApiKey(OTHER_API_KEY),
-        trusted:     true,
+        domain: "other-company.nexusid.com",
+        displayName: "Other Verifier",
+        apiKey: hashApiKey(OTHER_API_KEY),
+        trusted: true,
       },
     });
 
     await request(app)
       .get(`/api/v1/verification/request/${verificationRequestId}`)
-      .set('x-api-key', OTHER_API_KEY)
+      .set("x-api-key", OTHER_API_KEY)
       .expect(404);
   });
 
-  it('rejects polling without an API key — 401', async () => {
+  it("rejects polling without an API key — 401", async () => {
     await request(app)
       .get(`/api/v1/verification/request/${verificationRequestId}`)
       .expect(401);
@@ -982,7 +1071,7 @@ describe("Test 12 — Requests belong to the paired user", () => {
     const created = await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title"],
         nonce: generateNonce(),
@@ -1023,7 +1112,9 @@ describe("Test 12 — Requests belong to the paired user", () => {
     expect(last.verification_request_id).toBe(requestId);
     expect(last.push_token).toBe("test-fcm-token-abc123");
     const pushedTokens = spy.mock.calls
-      .map((c) => (c[0] as { verification_request_id: string; push_token: string }))
+      .map(
+        (c) => c[0] as { verification_request_id: string; push_token: string },
+      )
       .filter((c) => c.verification_request_id === requestId)
       .map((c) => c.push_token);
     expect(pushedTokens).toEqual(["test-fcm-token-abc123"]);
@@ -1035,13 +1126,18 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .set("Authorization", `Bearer ${otherToken}`)
       .expect(404);
 
-    const dbReq = await prisma.verificationRequest.findUnique({ where: { id: requestId } });
+    const dbReq = await prisma.verificationRequest.findUnique({
+      where: { id: requestId },
+    });
     expect(dbReq!.status).toBe("pending");
   });
 
   it("refuses a valid proof from a revoked credential (BR-006)", async () => {
     const jti = JSON.parse(
-      Buffer.from(testCredential.sd_jwt.split("~")[0].split(".")[1], "base64url").toString("utf8"),
+      Buffer.from(
+        testCredential.sd_jwt.split("~")[0].split(".")[1],
+        "base64url",
+      ).toString("utf8"),
     ).jti as string;
 
     await prisma.credential.create({
@@ -1060,7 +1156,9 @@ describe("Test 12 — Requests belong to the paired user", () => {
       },
     });
 
-    const dbReq = await prisma.verificationRequest.findUnique({ where: { id: requestId } });
+    const dbReq = await prisma.verificationRequest.findUnique({
+      where: { id: requestId },
+    });
     const proof = await generateTestProof(testCredential, userKeys.privateKey, {
       requestedFields: ["degree_title"],
       verifierId: testVerifierId,
@@ -1074,7 +1172,9 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .expect(400);
     expect(res.body.error).toMatch(/revoked/i);
 
-    const after = await prisma.verificationRequest.findUnique({ where: { id: requestId } });
+    const after = await prisma.verificationRequest.findUnique({
+      where: { id: requestId },
+    });
     expect(after!.status).toBe("pending"); // nothing was disclosed
 
     await prisma.credential.deleteMany({ where: { credentialJti: jti } });
@@ -1082,26 +1182,26 @@ describe("Test 12 — Requests belong to the paired user", () => {
 
   it("stops routing after the user revokes the pairing", async () => {
     const devices = await request(app)
-      .get("/api/v1/pairing/devices")
+      .get("/api/v1/pairings")
       .set("Authorization", `Bearer ${authToken}`)
       .expect(200);
     const pairingId = devices.body.data[0].pairingId as string;
 
     // Another user cannot revoke it.
     await request(app)
-      .delete(`/api/v1/pairing/devices/${pairingId}`)
+      .delete(`/api/v1/pairings/${pairingId}`)
       .set("Authorization", `Bearer ${otherToken}`)
       .expect(404);
 
     await request(app)
-      .delete(`/api/v1/pairing/devices/${pairingId}`)
+      .delete(`/api/v1/pairings/${pairingId}`)
       .set("Authorization", `Bearer ${authToken}`)
       .expect(200);
 
     await request(app)
       .post("/api/v1/verification/request")
       .set("x-api-key", TEST_API_KEY)
-      .set("x-pairing-secret", pairingSecret)
+      .set("x-pairing-token", pairingToken)
       .send({
         requestedFields: ["degree_title"],
         nonce: generateNonce(),
@@ -1122,13 +1222,21 @@ describe("Test 13 — Service Provider accounts", () => {
   it("registers a provider and returns its first API key once", async () => {
     const res = await request(app)
       .post("/api/v1/verifiers/register")
-      .send({ email, password, displayName: "Acme Hiring", domain: "acme-hiring.test" })
+      .send({
+        email,
+        password,
+        displayName: "Acme Hiring",
+        domain: "acme-hiring.test",
+      })
       .expect(201);
 
     firstKey = res.body.data.apiKey;
     providerToken = res.body.data.token;
     expect(firstKey).toMatch(/^nxk_/);
-    expect(res.body.data.verifier).toMatchObject({ displayName: "Acme Hiring", domain: "acme-hiring.test" });
+    expect(res.body.data.verifier).toMatchObject({
+      displayName: "Acme Hiring",
+      domain: "acme-hiring.test",
+    });
 
     // Only the hash is stored.
     const row = await prisma.verifier.findUnique({ where: { email } });
@@ -1144,8 +1252,14 @@ describe("Test 13 — Service Provider accounts", () => {
   });
 
   it("logs in with email + password", async () => {
-    await request(app).post("/api/v1/verifiers/login").send({ email, password: "wrong-password" }).expect(401);
-    const res = await request(app).post("/api/v1/verifiers/login").send({ email, password }).expect(200);
+    await request(app)
+      .post("/api/v1/verifiers/login")
+      .send({ email, password: "wrong-password" })
+      .expect(401);
+    const res = await request(app)
+      .post("/api/v1/verifiers/login")
+      .send({ email, password })
+      .expect(200);
     providerToken = res.body.data.token;
   });
 
@@ -1170,7 +1284,10 @@ describe("Test 13 — Service Provider accounts", () => {
   });
 
   it("rotating the key invalidates the previous one immediately (BR-009)", async () => {
-    await request(app).get("/api/v1/analytics/recent").set("x-api-key", firstKey).expect(200);
+    await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("x-api-key", firstKey)
+      .expect(200);
 
     const res = await request(app)
       .post("/api/v1/verifiers/me/api-key")
@@ -1179,8 +1296,14 @@ describe("Test 13 — Service Provider accounts", () => {
     const secondKey = res.body.data.apiKey as string;
     expect(secondKey).not.toBe(firstKey);
 
-    await request(app).get("/api/v1/analytics/recent").set("x-api-key", firstKey).expect(401);
-    await request(app).get("/api/v1/analytics/recent").set("x-api-key", secondKey).expect(200);
+    await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("x-api-key", firstKey)
+      .expect(401);
+    await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("x-api-key", secondKey)
+      .expect(200);
   });
 
   it("lists only its own verification requests", async () => {

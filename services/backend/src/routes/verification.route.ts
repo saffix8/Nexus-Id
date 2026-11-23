@@ -7,7 +7,7 @@ import {
 import { z } from "zod";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 import { requireApiKey } from "../middleware/api-key.middleware.js";
-import { PAIRING_SECRET_HEADER } from "../services/pairing.service.js";
+import { PAIRING_TOKEN_HEADER } from "../services/pairing.service.js";
 import {
   verificationService,
   VerificationError,
@@ -100,7 +100,7 @@ router.post(
         ...parsed.data,
         verifierId: verifier.id,
         verifierName: verifier.displayName,
-        pairingSecret: req.header(PAIRING_SECRET_HEADER) ?? "",
+        pairingToken: req.header(PAIRING_TOKEN_HEADER) ?? "",
       });
       res.status(200).json(success(result));
     } catch (err) {

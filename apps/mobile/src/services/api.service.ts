@@ -255,21 +255,24 @@ class ApiService {
     });
   }
 
-  // ── Device pairing (SRS UC-002, FR-003) ───────────────────────────────────
+  // ── Device pairing (SRS FR-003, API-025) ──────────────────────────────────
 
   /**
-   * Claims a browser-extension pairing code scanned from its QR, linking that
-   * browser to the signed-in End User. Throws ApiError with the server message
-   * on an invalid (400), already-used (409) or expired (410) code.
+   * Redeems a browser-extension pairing QR challenge, linking that browser to
+   * this device's account. `signature` is the device key's signature from
+   * CryptoService.signQrChallenge (ALG-007). Throws ApiError with the server
+   * message on an invalid code (400), bad signature (401), already-used (409)
+   * or expired (410) code.
    */
-  async claimPairing(
-    pairingId: string,
+  async redeemQrChallenge(
+    challengeId: string,
     code: string,
-  ): Promise<PairingClaimResult> {
-    return this.request<PairingClaimResult>({
+    signature: string,
+  ): Promise<QrChallengeRedeemResult> {
+    return this.request<QrChallengeRedeemResult>({
       method: 'POST',
-      url: '/pairing/claim',
-      data: { pairingId, code },
+      url: '/qr-challenges/redeem',
+      data: { challengeId, code, signature },
     });
   }
 
@@ -285,11 +288,12 @@ class ApiService {
   }
 }
 
-export interface PairingClaimResult {
-  pairingId: string;
-  status: 'paired';
+export interface QrChallengeRedeemResult {
+  challengeId: string;
+  purpose: 'PAIRING';
+  state: 'REDEEMED';
   expiresAt: string;
-  pairedAt: string | null;
+  redeemedAt: string | null;
 }
 
 // ─── Singleton Export ─────────────────────────────────────────────────────────

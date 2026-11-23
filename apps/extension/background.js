@@ -173,7 +173,7 @@ async function handleVerificationRequest(request, tabId) {
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': api_key,
-          'x-pairing-secret': pairing.secret,
+          'x-pairing-token': pairing.pairing_token, // SRS IF-005 pairing token
         },
         body: JSON.stringify(body),
       },
@@ -247,32 +247,51 @@ async function handleVerificationRequest(request, tabId) {
   return { request_id };
 }
 
-// ─── DEVICE PAIRING (SRS UC-002, FR-003, FR-024) ─────────────────────────────
+// ─── DEVICE PAIRING (SRS FR-031, FR-003; API-023, API-024) ───────────────────
 
 /**
  * chrome.storage.local record:
- *   { pairing_id, secret, status: 'pending'|'paired', expires_at, paired_at,
- *     qr_payload }   — qr_payload is dropped once paired.
- * The secret is this browser's credential for its pairing; the backend stores
- * only its hash.
+ *   { challenge_id, pairing_token, status: 'pending'|'paired', expires_at,
+ *     paired_at, qr_payload }   — qr_payload is dropped once paired.
+ * The pairing token is this browser's credential for its pairing (SRS IF-005);
+ * the backend stores only its hash.
  */
 const PAIRING_STORAGE_KEY = 'nexusid_pairing';
 
 async function getPairing() {
   const result = await chrome.storage.local.get(PAIRING_STORAGE_KEY);
-  return result[PAIRING_STORAGE_KEY] || null;
+  const record = result[PAIRING_STORAGE_KEY];
+  if (!record) return null;
+  // Records written before the SRS route names: same values, old field names.
+  if (!record.pairing_token && record.secret) {
+    const migrated = {
+      challenge_id:  record.pairing_id,
+      pairing_token: record.secret,
+      status:        record.status,
+      expires_at:    record.expires_at,
+      paired_at:     record.paired_at,
+      qr_payload:    record.qr_payload,
+    };
+    await chrome.storage.local.set({ [PAIRING_STORAGE_KEY]: migrated });
+    return migrated;
+  }
+  return record;
 }
 
 /**
- * Creates a new pairing session and returns what the popup needs to draw the
- * QR code. Replaces any previous pending (unclaimed) session.
+ * API-023 — creates a PAIRING QR challenge and returns what the popup needs
+ * to draw it. Replaces any previous pending (unredeemed) challenge.
  */
 async function startPairing() {
   let response;
   try {
     response = await fetchWithTimeout(
-      `${BACKEND_URL}/pairing/sessions`,
-      { method: 'POST' },
+      `${BACKEND_URL}/qr-challenges`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purpose: 'PAIRING' }),
+      },
       10000
     );
   } catch (err) {
@@ -284,14 +303,14 @@ async function startPairing() {
     throw new Error((json && json.error) || `Pairing failed (HTTP ${response.status})`);
   }
 
-  const { pairingId, secret, expiresAt, qrPayload } = json.data;
+  const { challengeId, pairingToken, expiresAt, qrPayload } = json.data;
   const record = {
-    pairing_id: pairingId,
-    secret,
-    status:     'pending',
-    expires_at: expiresAt,
-    paired_at:  null,
-    qr_payload: qrPayload,
+    challenge_id:  challengeId,
+    pairing_token: pairingToken,
+    status:        'pending',
+    expires_at:    expiresAt,
+    paired_at:     null,
+    qr_payload:    qrPayload,
   };
   await chrome.storage.local.set({ [PAIRING_STORAGE_KEY]: record });
 
@@ -299,8 +318,8 @@ async function startPairing() {
 }
 
 /**
- * Returns the current pairing state, asking the backend when a QR code is
- * still waiting to be scanned. Never exposes the secret to the popup.
+ * Returns the current pairing state, asking the backend (API-024) while a QR
+ * code is still waiting to be scanned. Never exposes the token to the popup.
  *
  * @returns {Promise<{status: 'unpaired'|'pending'|'paired'|'expired', qr_payload?: string, expires_at?: string, paired_at?: string}>}
  */
@@ -312,17 +331,23 @@ async function checkPairing() {
     return { status: 'paired', paired_at: pairing.paired_at };
   }
 
-  // Pending — ask the backend whether the phone has claimed it yet.
+  const pendingState = {
+    status: 'pending',
+    qr_payload: pairing.qr_payload,
+    expires_at: pairing.expires_at,
+  };
+
+  // Pending — ask the backend whether the phone has redeemed it yet.
   let response;
   try {
     response = await fetchWithTimeout(
-      `${BACKEND_URL}/pairing/sessions/${pairing.pairing_id}`,
-      { method: 'GET', headers: { 'x-pairing-secret': pairing.secret } },
+      `${BACKEND_URL}/qr-challenges/${pairing.challenge_id}`,
+      { method: 'GET', headers: { 'x-pairing-token': pairing.pairing_token } },
       8000
     );
   } catch (err) {
     // Transient — report the local state and let the popup retry.
-    return { status: 'pending', qr_payload: pairing.qr_payload, expires_at: pairing.expires_at };
+    return pendingState;
   }
 
   if (response.status === 404) {
@@ -331,32 +356,30 @@ async function checkPairing() {
   }
 
   const json = await response.json().catch(() => null);
-  const state = json && json.data;
-  if (!response.ok || !state) {
-    return { status: 'pending', qr_payload: pairing.qr_payload, expires_at: pairing.expires_at };
-  }
+  const challenge = json && json.data;
+  if (!response.ok || !challenge) return pendingState;
 
-  if (state.status === 'paired') {
+  if (challenge.state === 'REDEEMED') {
     await chrome.storage.local.set({
       [PAIRING_STORAGE_KEY]: {
-        pairing_id: pairing.pairing_id,
-        secret:     pairing.secret,
-        status:     'paired',
-        expires_at: pairing.expires_at,
-        paired_at:  state.pairedAt,
+        challenge_id:  pairing.challenge_id,
+        pairing_token: pairing.pairing_token,
+        status:        'paired',
+        expires_at:    pairing.expires_at,
+        paired_at:     challenge.redeemedAt,
       },
     });
     showBrowserNotification('Device paired', 'This browser is now linked to your NexusID app.');
-    return { status: 'paired', paired_at: state.pairedAt };
+    return { status: 'paired', paired_at: challenge.redeemedAt };
   }
 
-  if (state.status === 'expired' || state.status === 'revoked') {
-    // BR-002 / 1.E1 — the code can no longer be used.
+  if (challenge.state === 'EXPIRED') {
+    // BR-002 — the code can no longer be used; the popup offers a new one.
     await chrome.storage.local.remove(PAIRING_STORAGE_KEY);
     return { status: 'expired' };
   }
 
-  return { status: 'pending', qr_payload: pairing.qr_payload, expires_at: pairing.expires_at };
+  return pendingState;
 }
 
 // ─── POLLING ──────────────────────────────────────────────────────────────────

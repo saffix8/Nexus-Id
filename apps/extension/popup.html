@@ -1,772 +1,981 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NexusID</title>
-  <style>
-    /* ── RESET & BASE ───────────────────────────────── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      width: 320px;
-      min-height: 160px;
-      background: #0C0E13;
-      color: #EEF0F6;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 13px;
-      line-height: 1.5;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* ── TYPOGRAPHY ─────────────────────────────────── */
-    .text-primary   { color: #EEF0F6; }
-    .text-secondary { color: #8B92A8; }
-    .text-tertiary  { color: #525A72; }
-    .text-accent    { color: #3B6FE8; }
-    .text-success   { color: #22C55E; }
-    .text-warning   { color: #F59E0B; }
-    .text-danger    { color: #EF4444; }
-    .text-mono      { font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; }
-
-    /* ── LAYOUT ─────────────────────────────────────── */
-    .popup-wrapper {
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ── HEADER ─────────────────────────────────────── */
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 16px 12px;
-      border-bottom: 1px solid #1E2330;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .logo-mark {
-      width: 24px;
-      height: 24px;
-      border-radius: 6px;
-      background: linear-gradient(135deg, #3B6FE8, #5B4FE8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .logo-mark svg {
-      width: 14px;
-      height: 14px;
-      fill: white;
-    }
-
-    .logo-text {
-      font-size: 14px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      background: linear-gradient(135deg, #3B6FE8, #5B4FE8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .header-badge {
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding: 3px 8px;
-      border-radius: 20px;
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .header-badge.idle    { background: #1A1E28; color: #525A72; border: 1px solid #1E2330; }
-    .header-badge.pending { background: #261D07; color: #F59E0B; border: 1px solid #4D3A0E; }
-    .header-badge.done    { background: #0F2A1A; color: #22C55E; border: 1px solid #16532F; }
-    .header-badge.rejected{ background: #250F0F; color: #EF4444; border: 1px solid #4A1515; }
-
-    /* ── CONTENT AREA ───────────────────────────────── */
-    .content {
-      padding: 16px;
-    }
-
-    /* ── STATE PANELS ───────────────────────────────── */
-    .state-panel { display: none; }
-    .state-panel.active { display: block; }
-
-    /* ─── STATE 1: IDLE ───────────────────────────── */
-    .idle-body {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      padding: 20px 8px 8px;
-      gap: 8px;
-    }
-
-    .idle-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 14px;
-      background: #13161E;
-      border: 1px solid #1E2330;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 4px;
-    }
-
-    .idle-icon svg {
-      width: 24px;
-      height: 24px;
-      color: #525A72;
-    }
-
-    .idle-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #EEF0F6;
-    }
-
-    .idle-sub {
-      font-size: 12px;
-      color: #8B92A8;
-      line-height: 1.6;
-      max-width: 220px;
-    }
-
-    .dashboard-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      margin-top: 12px;
-      padding: 7px 14px;
-      border-radius: 7px;
-      background: transparent;
-      border: 1px solid #252C3D;
-      color: #8B92A8;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      text-decoration: none;
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
-    }
-
-    .dashboard-link:hover {
-      border-color: #3B6FE8;
-      color: #3B6FE8;
-      background: rgba(59, 111, 232, 0.06);
-    }
-
-    .dashboard-link svg {
-      width: 12px;
-      height: 12px;
-    }
-
-    /* ─── STATE 2: PENDING ─────────────────────────── */
-    .verifier-card {
-      background: #13161E;
-      border: 1px solid #252C3D;
-      border-radius: 10px;
-      padding: 12px 14px;
-      margin-bottom: 12px;
-    }
-
-    .verifier-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 6px;
-    }
-
-    .verifier-avatar {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
-      background: #1A1E28;
-      border: 1px solid #252C3D;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      flex-shrink: 0;
-    }
-
-    .verifier-name {
-      font-size: 13px;
-      font-weight: 600;
-      color: #EEF0F6;
-      line-height: 1.3;
-    }
-
-    .verifier-domain {
-      font-size: 11px;
-      color: #525A72;
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .fields-label {
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #525A72;
-      font-family: 'JetBrains Mono', monospace;
-      margin-bottom: 6px;
-    }
-
-    .fields-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .field-item {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      font-size: 12px;
-      color: #8B92A8;
-    }
-
-    .field-dot {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: #3B6FE8;
-      flex-shrink: 0;
-    }
-
-    /* Spinner */
-    .waiting-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 0 4px;
-      color: #8B92A8;
-      font-size: 12px;
-    }
-
-    .spinner {
-      width: 14px;
-      height: 14px;
-      border: 1.5px solid #252C3D;
-      border-top-color: #F59E0B;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      flex-shrink: 0;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    /* Pulse dot */
-    .pulse-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #F59E0B;
-      margin-right: 6px;
-      position: relative;
-    }
-
-    .pulse-dot::after {
-      content: '';
-      position: absolute;
-      inset: -3px;
-      border-radius: 50%;
-      border: 1.5px solid #F59E0B;
-      animation: pulse-ring 1.5s ease-out infinite;
-    }
-
-    @keyframes pulse-ring {
-      0%   { opacity: 0.7; transform: scale(0.9); }
-      100% { opacity: 0;   transform: scale(1.7); }
-    }
-
-    .pending-heading {
-      display: flex;
-      align-items: center;
-      font-size: 13px;
-      font-weight: 600;
-      color: #F59E0B;
-      margin-bottom: 12px;
-    }
-
-    /* Divider */
-    .divider {
-      height: 1px;
-      background: #1E2330;
-      margin: 12px 0;
-    }
-
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 7px 14px;
-      border-radius: 7px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      transition: opacity 0.15s, background 0.15s;
-      text-decoration: none;
-    }
-
-    .btn:active { opacity: 0.75; }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #3B6FE8, #5B4FE8);
-      color: #FFFFFF;
-      width: 100%;
-    }
-
-    .btn-primary:disabled { opacity: 0.5; cursor: default; }
-
-    /* ── PAIRING (UC-002) ───────────────────────────── */
-    .pairing-card {
-      margin-top: 16px;
-      padding: 12px;
-      border: 1px solid #1E2330;
-      border-radius: 8px;
-      background: #13161E;
-      text-align: left;
-    }
-
-    .pairing-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .pairing-status { font-size: 12px; font-weight: 500; }
-    .pairing-status.paired { color: #22C55E; }
-    .pairing-status.unpaired { color: #F59E0B; }
-
-    .pairing-hint { font-size: 11px; color: #525A72; margin: 4px 0 10px; }
-
-    .link-btn {
-      background: none;
-      border: none;
-      color: #525A72;
-      font-size: 11px;
-      cursor: pointer;
-      text-decoration: underline;
-    }
-
-    .pairing-panel { padding: 16px; text-align: center; }
-    .pairing-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-    .pairing-sub { font-size: 12px; color: #8B92A8; margin-bottom: 14px; }
-
-    .qr-frame {
-      display: inline-block;
-      padding: 10px;
-      background: #FFFFFF;
-      border-radius: 8px;
-      line-height: 0;
-    }
-
-    .qr-frame.expired { opacity: 0.25; }
-
-    .pairing-expiry {
-      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-      font-size: 11px;
-      color: #525A72;
-      margin: 10px 0 12px;
-    }
-
-    .pairing-error { font-size: 12px; color: #EF4444; margin: 8px 0; }
-
-    .btn-cancel {
-      background: transparent;
-      border: 1px solid #4A1515;
-      color: #EF4444;
-      width: 100%;
-    }
-
-    .btn-cancel:hover {
-      background: rgba(239, 68, 68, 0.08);
-    }
-
-    /* ─── STATE 3: COMPLETED ───────────────────────── */
-    .success-header {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 8px 0 16px;
-      gap: 8px;
-      text-align: center;
-    }
-
-    .checkmark-circle {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: #0F2A1A;
-      border: 1.5px solid #16532F;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: pop-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    @keyframes pop-in {
-      from { transform: scale(0.7); opacity: 0; }
-      to   { transform: scale(1);   opacity: 1; }
-    }
-
-    /* SVG checkmark draw-on animation */
-    .checkmark-path {
-      stroke-dasharray: 30;
-      stroke-dashoffset: 30;
-      animation: draw-check 0.4s 0.15s ease forwards;
-    }
-
-    @keyframes draw-check {
-      to { stroke-dashoffset: 0; }
-    }
-
-    .verified-heading {
-      font-size: 16px;
-      font-weight: 700;
-      color: #22C55E;
-      letter-spacing: -0.01em;
-    }
-
-    .verified-subtext {
-      font-size: 11px;
-      color: #525A72;
-    }
-
-    .verified-fields {
-      background: #13161E;
-      border: 1px solid #1E2330;
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 4px;
-    }
-
-    .verified-field-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 8px 12px;
-      border-bottom: 1px solid #1E2330;
-    }
-
-    .verified-field-row:last-child {
-      border-bottom: none;
-    }
-
-    .verified-field-key {
-      font-size: 10px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #525A72;
-      font-family: 'JetBrains Mono', monospace;
-      flex-shrink: 0;
-    }
-
-    .verified-field-value {
-      font-size: 12px;
-      color: #EEF0F6;
-      text-align: right;
-      word-break: break-word;
-    }
-
-    .timestamp-row {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 10px;
-      color: #525A72;
-      font-family: 'JetBrains Mono', monospace;
-      margin-top: 8px;
-    }
-
-    .timestamp-row svg {
-      width: 10px;
-      height: 10px;
-    }
-
-    /* ─── STATE 4: REJECTED ────────────────────────── */
-    .rejected-header {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 20px 0 16px;
-      gap: 8px;
-      text-align: center;
-    }
-
-    .x-circle {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: #250F0F;
-      border: 1.5px solid #4A1515;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    .rejected-heading {
-      font-size: 16px;
-      font-weight: 700;
-      color: #EF4444;
-      letter-spacing: -0.01em;
-    }
-
-    .rejected-sub {
-      font-size: 12px;
-      color: #8B92A8;
-      max-width: 220px;
-      text-align: center;
-      line-height: 1.6;
-    }
-
-    .rejected-verifier {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: #13161E;
-      border: 1px solid #1E2330;
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-top: 4px;
-    }
-
-    .rejected-verifier-name {
-      font-size: 12px;
-      font-weight: 500;
-      color: #8B92A8;
-    }
-
-    /* ── FOOTER ─────────────────────────────────────── */
-    .popup-footer {
-      border-top: 1px solid #1E2330;
-      padding: 10px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .footer-text {
-      font-size: 10px;
-      color: #525A72;
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .footer-link {
-      font-size: 10px;
-      color: #3B6FE8;
-      cursor: pointer;
-      text-decoration: none;
-      background: none;
-      border: none;
-      padding: 0;
-      font-family: inherit;
-    }
-
-    .footer-link:hover { text-decoration: underline; }
-
-    /* ── SLIDE-IN ANIMATION FOR CONTENT ─────────────── */
-    .state-panel.active {
-      animation: fade-in 0.2s ease-out;
-    }
-
-    @keyframes fade-in {
-      from { opacity: 0; transform: translateY(4px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-  </style>
-</head>
-<body>
-<div class="popup-wrapper">
-
-  <!-- ── HEADER ──────────────────────────────────── -->
-  <div class="header">
-    <div class="logo">
-      <div class="logo-mark">
-        <!-- N mark: a stylised shield -->
-        <svg viewBox="0 0 14 14" fill="white" xmlns="http://www.w3.org/2000/svg">
-          <path d="M7 1L2 3.5V7.5C2 10.2 4.2 12.7 7 13C9.8 12.7 12 10.2 12 7.5V3.5L7 1Z"/>
-        </svg>
-      </div>
-      <span class="logo-text">NexusID</span>
-    </div>
-    <!-- State badge — updated by JS -->
-    <span class="header-badge idle" id="header-badge">Idle</span>
-  </div>
-
-  <!-- ── CONTENT ──────────────────────────────────── -->
-  <div class="content">
-
-    <!-- ─── STATE 1: IDLE ─────────────────────────── -->
-    <div class="state-panel active" id="state-idle">
-      <div class="idle-body">
-        <div class="idle-icon">
-          <!-- Shield with lock -->
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z"/>
-            <rect x="9" y="11" width="6" height="5" rx="1" stroke-width="1.5"/>
-            <path d="M10 11V9.5a2 2 0 014 0V11" stroke-width="1.5"/>
-          </svg>
-        </div>
-        <p class="idle-title">No pending verifications</p>
-        <p class="idle-sub">Visit a website with NexusID verification to get started.</p>
-
-        <!-- Device pairing status (SRS UC-002, FR-003) -->
-        <div class="pairing-card" id="pairing-card">
-          <div class="pairing-row">
-            <span class="pairing-status unpaired" id="pairing-status">Not paired with your phone</span>
-            <button class="link-btn" id="forget-pairing-btn" style="display:none;">Forget</button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NexusID</title>
+    <style>
+      /* ── RESET & BASE ───────────────────────────────── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        width: 320px;
+        min-height: 160px;
+        background: #0c0e13;
+        color: #eef0f6;
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── TYPOGRAPHY ─────────────────────────────────── */
+      .text-primary {
+        color: #eef0f6;
+      }
+      .text-secondary {
+        color: #8b92a8;
+      }
+      .text-tertiary {
+        color: #525a72;
+      }
+      .text-accent {
+        color: #3b6fe8;
+      }
+      .text-success {
+        color: #22c55e;
+      }
+      .text-warning {
+        color: #f59e0b;
+      }
+      .text-danger {
+        color: #ef4444;
+      }
+      .text-mono {
+        font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+      }
+
+      /* ── LAYOUT ─────────────────────────────────────── */
+      .popup-wrapper {
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── HEADER ─────────────────────────────────────── */
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px 12px;
+        border-bottom: 1px solid #1e2330;
+      }
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .logo-mark {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        background: linear-gradient(135deg, #3b6fe8, #5b4fe8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .logo-mark svg {
+        width: 14px;
+        height: 14px;
+        fill: white;
+      }
+
+      .logo-text {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        background: linear-gradient(135deg, #3b6fe8, #5b4fe8);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .header-badge {
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 3px 8px;
+        border-radius: 20px;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .header-badge.idle {
+        background: #1a1e28;
+        color: #525a72;
+        border: 1px solid #1e2330;
+      }
+      .header-badge.pending {
+        background: #261d07;
+        color: #f59e0b;
+        border: 1px solid #4d3a0e;
+      }
+      .header-badge.done {
+        background: #0f2a1a;
+        color: #22c55e;
+        border: 1px solid #16532f;
+      }
+      .header-badge.rejected {
+        background: #250f0f;
+        color: #ef4444;
+        border: 1px solid #4a1515;
+      }
+
+      /* ── CONTENT AREA ───────────────────────────────── */
+      .content {
+        padding: 16px;
+      }
+
+      /* ── STATE PANELS ───────────────────────────────── */
+      .state-panel {
+        display: none;
+      }
+      .state-panel.active {
+        display: block;
+      }
+
+      /* ─── STATE 1: IDLE ───────────────────────────── */
+      .idle-body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 20px 8px 8px;
+        gap: 8px;
+      }
+
+      .idle-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        background: #13161e;
+        border: 1px solid #1e2330;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 4px;
+      }
+
+      .idle-icon svg {
+        width: 24px;
+        height: 24px;
+        color: #525a72;
+      }
+
+      .idle-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #eef0f6;
+      }
+
+      .idle-sub {
+        font-size: 12px;
+        color: #8b92a8;
+        line-height: 1.6;
+        max-width: 220px;
+      }
+
+      .dashboard-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 12px;
+        padding: 7px 14px;
+        border-radius: 7px;
+        background: transparent;
+        border: 1px solid #252c3d;
+        color: #8b92a8;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: none;
+        transition:
+          border-color 0.15s,
+          color 0.15s,
+          background 0.15s;
+      }
+
+      .dashboard-link:hover {
+        border-color: #3b6fe8;
+        color: #3b6fe8;
+        background: rgba(59, 111, 232, 0.06);
+      }
+
+      .dashboard-link svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      /* ─── STATE 2: PENDING ─────────────────────────── */
+      .verifier-card {
+        background: #13161e;
+        border: 1px solid #252c3d;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+
+      .verifier-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+
+      .verifier-avatar {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        background: #1a1e28;
+        border: 1px solid #252c3d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .verifier-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: #eef0f6;
+        line-height: 1.3;
+      }
+
+      .verifier-domain {
+        font-size: 11px;
+        color: #525a72;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .fields-label {
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #525a72;
+        font-family: "JetBrains Mono", monospace;
+        margin-bottom: 6px;
+      }
+
+      .fields-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .field-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+        color: #8b92a8;
+      }
+
+      .field-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #3b6fe8;
+        flex-shrink: 0;
+      }
+
+      /* Spinner */
+      .waiting-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 0 4px;
+        color: #8b92a8;
+        font-size: 12px;
+      }
+
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 1.5px solid #252c3d;
+        border-top-color: #f59e0b;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        flex-shrink: 0;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Pulse dot */
+      .pulse-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #f59e0b;
+        margin-right: 6px;
+        position: relative;
+      }
+
+      .pulse-dot::after {
+        content: "";
+        position: absolute;
+        inset: -3px;
+        border-radius: 50%;
+        border: 1.5px solid #f59e0b;
+        animation: pulse-ring 1.5s ease-out infinite;
+      }
+
+      @keyframes pulse-ring {
+        0% {
+          opacity: 0.7;
+          transform: scale(0.9);
+        }
+        100% {
+          opacity: 0;
+          transform: scale(1.7);
+        }
+      }
+
+      .pending-heading {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: #f59e0b;
+        margin-bottom: 12px;
+      }
+
+      /* Divider */
+      .divider {
+        height: 1px;
+        background: #1e2330;
+        margin: 12px 0;
+      }
+
+      /* Buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 7px 14px;
+        border-radius: 7px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        transition:
+          opacity 0.15s,
+          background 0.15s;
+        text-decoration: none;
+      }
+
+      .btn:active {
+        opacity: 0.75;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #3b6fe8, #5b4fe8);
+        color: #ffffff;
+        width: 100%;
+      }
+
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      /* ── PAIRING (UC-002) ───────────────────────────── */
+      .pairing-card {
+        margin-top: 16px;
+        padding: 12px;
+        border: 1px solid #1e2330;
+        border-radius: 8px;
+        background: #13161e;
+        text-align: left;
+      }
+
+      .pairing-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .pairing-status {
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .pairing-status.paired {
+        color: #22c55e;
+      }
+      .pairing-status.unpaired {
+        color: #f59e0b;
+      }
+
+      .pairing-hint {
+        font-size: 11px;
+        color: #525a72;
+        margin: 4px 0 10px;
+      }
+
+      .link-btn {
+        background: none;
+        border: none;
+        color: #525a72;
+        font-size: 11px;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+
+      .pairing-panel {
+        padding: 16px;
+        text-align: center;
+      }
+      .pairing-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .pairing-sub {
+        font-size: 12px;
+        color: #8b92a8;
+        margin-bottom: 14px;
+      }
+
+      .qr-frame {
+        display: inline-block;
+        padding: 10px;
+        background: #ffffff;
+        border-radius: 8px;
+        line-height: 0;
+      }
+
+      .qr-frame.expired {
+        opacity: 0.25;
+      }
+
+      .pairing-expiry {
+        font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+        font-size: 11px;
+        color: #525a72;
+        margin: 10px 0 12px;
+      }
+
+      .pairing-error {
+        font-size: 12px;
+        color: #ef4444;
+        margin: 8px 0;
+      }
+
+      .btn-cancel {
+        background: transparent;
+        border: 1px solid #4a1515;
+        color: #ef4444;
+        width: 100%;
+      }
+
+      .btn-cancel:hover {
+        background: rgba(239, 68, 68, 0.08);
+      }
+
+      /* ─── STATE 3: COMPLETED ───────────────────────── */
+      .success-header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 8px 0 16px;
+        gap: 8px;
+        text-align: center;
+      }
+
+      .checkmark-circle {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: #0f2a1a;
+        border: 1.5px solid #16532f;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: pop-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      @keyframes pop-in {
+        from {
+          transform: scale(0.7);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      /* SVG checkmark draw-on animation */
+      .checkmark-path {
+        stroke-dasharray: 30;
+        stroke-dashoffset: 30;
+        animation: draw-check 0.4s 0.15s ease forwards;
+      }
+
+      @keyframes draw-check {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      .verified-heading {
+        font-size: 16px;
+        font-weight: 700;
+        color: #22c55e;
+        letter-spacing: -0.01em;
+      }
+
+      .verified-subtext {
+        font-size: 11px;
+        color: #525a72;
+      }
+
+      .verified-fields {
+        background: #13161e;
+        border: 1px solid #1e2330;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 4px;
+      }
+
+      .verified-field-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 12px;
+        border-bottom: 1px solid #1e2330;
+      }
+
+      .verified-field-row:last-child {
+        border-bottom: none;
+      }
+
+      .verified-field-key {
+        font-size: 10px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #525a72;
+        font-family: "JetBrains Mono", monospace;
+        flex-shrink: 0;
+      }
+
+      .verified-field-value {
+        font-size: 12px;
+        color: #eef0f6;
+        text-align: right;
+        word-break: break-word;
+      }
+
+      .timestamp-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 10px;
+        color: #525a72;
+        font-family: "JetBrains Mono", monospace;
+        margin-top: 8px;
+      }
+
+      .timestamp-row svg {
+        width: 10px;
+        height: 10px;
+      }
+
+      /* ─── STATE 4: REJECTED ────────────────────────── */
+      .rejected-header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px 0 16px;
+        gap: 8px;
+        text-align: center;
+      }
+
+      .x-circle {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: #250f0f;
+        border: 1.5px solid #4a1515;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .rejected-heading {
+        font-size: 16px;
+        font-weight: 700;
+        color: #ef4444;
+        letter-spacing: -0.01em;
+      }
+
+      .rejected-sub {
+        font-size: 12px;
+        color: #8b92a8;
+        max-width: 220px;
+        text-align: center;
+        line-height: 1.6;
+      }
+
+      .rejected-verifier {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #13161e;
+        border: 1px solid #1e2330;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-top: 4px;
+      }
+
+      .rejected-verifier-name {
+        font-size: 12px;
+        font-weight: 500;
+        color: #8b92a8;
+      }
+
+      /* ── FOOTER ─────────────────────────────────────── */
+      .popup-footer {
+        border-top: 1px solid #1e2330;
+        padding: 10px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .footer-text {
+        font-size: 10px;
+        color: #525a72;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .footer-link {
+        font-size: 10px;
+        color: #3b6fe8;
+        cursor: pointer;
+        text-decoration: none;
+        background: none;
+        border: none;
+        padding: 0;
+        font-family: inherit;
+      }
+
+      .footer-link:hover {
+        text-decoration: underline;
+      }
+
+      /* ── SLIDE-IN ANIMATION FOR CONTENT ─────────────── */
+      .state-panel.active {
+        animation: fade-in 0.2s ease-out;
+      }
+
+      @keyframes fade-in {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="popup-wrapper">
+      <!-- ── HEADER ──────────────────────────────────── -->
+      <div class="header">
+        <div class="logo">
+          <div class="logo-mark">
+            <!-- N mark: a stylised shield -->
+            <svg
+              viewBox="0 0 14 14"
+              fill="white"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M7 1L2 3.5V7.5C2 10.2 4.2 12.7 7 13C9.8 12.7 12 10.2 12 7.5V3.5L7 1Z"
+              />
+            </svg>
           </div>
-          <p class="pairing-hint" id="pairing-hint">Pair once so verification requests reach your NexusID app.</p>
-          <button class="btn btn-primary" id="pair-btn">Pair device</button>
+          <span class="logo-text">NexusID</span>
         </div>
-
-        <a href="#" class="dashboard-link" id="open-dashboard-idle">
-          Open Dashboard
-          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 6h8M6 2l4 4-4 4"/>
-          </svg>
-        </a>
-      </div>
-    </div>
-
-    <!-- ─── STATE: PAIRING (UC-002) ───────────────── -->
-    <div class="state-panel" id="state-pairing">
-      <div class="pairing-panel">
-        <p class="pairing-title">Scan with the NexusID app</p>
-        <p class="pairing-sub">Open the app on your phone, choose “Pair browser”, and scan this code.</p>
-        <div class="qr-frame" id="qr-frame">
-          <canvas id="qr-canvas" width="180" height="180"></canvas>
-        </div>
-        <p class="pairing-expiry" id="pairing-expiry">—</p>
-        <p class="pairing-error" id="pairing-error" style="display:none;"></p>
-        <!-- For pairing from the web dashboard instead of scanning -->
-        <button class="link-btn" id="copy-code-btn" style="margin-bottom:8px;">Copy code instead</button><br />
-        <button class="btn btn-primary" id="new-code-btn" style="display:none;">Generate new code</button>
-        <button class="link-btn" id="cancel-pairing-btn">Cancel</button>
-      </div>
-    </div>
-
-    <!-- ─── STATE 2: PENDING ──────────────────────── -->
-    <div class="state-panel" id="state-pending">
-      <div class="pending-heading">
-        <span class="pulse-dot"></span>
-        Verification Pending
+        <!-- State badge — updated by JS -->
+        <span class="header-badge idle" id="header-badge">Idle</span>
       </div>
 
-      <div class="verifier-card">
-        <div class="verifier-row">
-          <div class="verifier-avatar">🏢</div>
-          <div>
-            <div class="verifier-name" id="pending-verifier-name">—</div>
-            <div class="verifier-domain" id="pending-verifier-domain">—</div>
+      <!-- ── CONTENT ──────────────────────────────────── -->
+      <div class="content">
+        <!-- ─── STATE 1: IDLE ─────────────────────────── -->
+        <div class="state-panel active" id="state-idle">
+          <div class="idle-body">
+            <div class="idle-icon">
+              <!-- Shield with lock -->
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z"
+                />
+                <rect
+                  x="9"
+                  y="11"
+                  width="6"
+                  height="5"
+                  rx="1"
+                  stroke-width="1.5"
+                />
+                <path d="M10 11V9.5a2 2 0 014 0V11" stroke-width="1.5" />
+              </svg>
+            </div>
+            <p class="idle-title">No pending verifications</p>
+            <p class="idle-sub">
+              Visit a website with NexusID verification to get started.
+            </p>
+
+            <!-- Device pairing status (SRS UC-002, FR-003) -->
+            <div class="pairing-card" id="pairing-card">
+              <div class="pairing-row">
+                <span class="pairing-status unpaired" id="pairing-status"
+                  >Not paired with your phone</span
+                >
+                <button
+                  class="link-btn"
+                  id="forget-pairing-btn"
+                  style="display: none"
+                >
+                  Forget
+                </button>
+              </div>
+              <p class="pairing-hint" id="pairing-hint">
+                Pair once so verification requests reach your NexusID app.
+              </p>
+              <button class="btn btn-primary" id="pair-btn">Pair device</button>
+            </div>
+
+            <a href="#" class="dashboard-link" id="open-dashboard-idle">
+              Open Dashboard
+              <svg
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M2 6h8M6 2l4 4-4 4" />
+              </svg>
+            </a>
           </div>
         </div>
 
-        <div class="fields-label">Requesting</div>
-        <ul class="fields-list" id="pending-fields-list">
-          <!-- Populated by JS -->
-        </ul>
-      </div>
-
-      <div class="waiting-row">
-        <span class="spinner"></span>
-        <span>Waiting for phone approval…</span>
-      </div>
-
-      <div class="divider"></div>
-
-      <button class="btn btn-cancel" id="cancel-btn">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-          <path d="M2 2l8 8M10 2l-8 8"/>
-        </svg>
-        Cancel Request
-      </button>
-    </div>
-
-    <!-- ─── STATE 3: COMPLETED ────────────────────── -->
-    <div class="state-panel" id="state-completed">
-      <div class="success-header">
-        <div class="checkmark-circle">
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <path class="checkmark-path" d="M5 11l4.5 4.5L17 7"
-              stroke="#22C55E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+        <!-- ─── STATE: PAIRING (UC-002) ───────────────── -->
+        <div class="state-panel" id="state-pairing">
+          <div class="pairing-panel">
+            <p class="pairing-title">Scan with your phone</p>
+            <p class="pairing-sub">
+              Use the NexusID app (“Pair browser”) or your phone camera, then
+              approve on your phone.
+            </p>
+            <div class="qr-frame" id="qr-frame">
+              <canvas id="qr-canvas" width="180" height="180"></canvas>
+            </div>
+            <p class="pairing-expiry" id="pairing-expiry">—</p>
+            <p
+              class="pairing-error"
+              id="pairing-error"
+              style="display: none"
+            ></p>
+            <!-- For pairing from the web dashboard instead of scanning -->
+            <button
+              class="link-btn"
+              id="copy-code-btn"
+              style="margin-bottom: 8px"
+            >
+              Copy code instead</button
+            ><br />
+            <button
+              class="btn btn-primary"
+              id="new-code-btn"
+              style="display: none"
+            >
+              Generate new code
+            </button>
+            <button class="link-btn" id="cancel-pairing-btn">Cancel</button>
+          </div>
         </div>
-        <p class="verified-heading">Verified!</p>
-        <p class="verified-subtext" id="completed-verifier-label">—</p>
-      </div>
 
-      <div class="verified-fields" id="verified-fields-container">
-        <!-- Rows populated by JS -->
-      </div>
+        <!-- ─── STATE 2: PENDING ──────────────────────── -->
+        <div class="state-panel" id="state-pending">
+          <div class="pending-heading">
+            <span class="pulse-dot"></span>
+            Verification Pending
+          </div>
 
-      <div class="timestamp-row">
-        <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
-          <circle cx="5" cy="5" r="4"/>
-          <path d="M5 3v2l1.5 1.5"/>
-        </svg>
-        <span id="completed-timestamp">—</span>
-      </div>
-    </div>
+          <div class="verifier-card">
+            <div class="verifier-row">
+              <div class="verifier-avatar">🏢</div>
+              <div>
+                <div class="verifier-name" id="pending-verifier-name">—</div>
+                <div class="verifier-domain" id="pending-verifier-domain">
+                  —
+                </div>
+              </div>
+            </div>
 
-    <!-- ─── STATE 4: REJECTED ─────────────────────── -->
-    <div class="state-panel" id="state-rejected">
-      <div class="rejected-header">
-        <div class="x-circle">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M5 5l10 10M15 5L5 15"
-              stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
-          </svg>
+            <div class="fields-label">Requesting</div>
+            <ul class="fields-list" id="pending-fields-list">
+              <!-- Populated by JS -->
+            </ul>
+          </div>
+
+          <div class="waiting-row">
+            <span class="spinner"></span>
+            <span>Waiting for phone approval…</span>
+          </div>
+
+          <div class="divider"></div>
+
+          <button class="btn btn-cancel" id="cancel-btn">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            >
+              <path d="M2 2l8 8M10 2l-8 8" />
+            </svg>
+            Cancel Request
+          </button>
         </div>
-        <p class="rejected-heading">Rejected</p>
-        <p class="rejected-sub" id="rejected-sub-text">
-          You declined to share your credentials with this verifier.
-        </p>
-      </div>
 
-      <div class="rejected-verifier" id="rejected-verifier-row" style="display:none;">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#525A72" stroke-width="1.3" stroke-linecap="round">
-          <rect x="1" y="3" width="12" height="9" rx="1.5"/>
-          <path d="M1 6h12"/>
-        </svg>
-        <span class="rejected-verifier-name" id="rejected-verifier-name">—</span>
+        <!-- ─── STATE 3: COMPLETED ────────────────────── -->
+        <div class="state-panel" id="state-completed">
+          <div class="success-header">
+            <div class="checkmark-circle">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <path
+                  class="checkmark-path"
+                  d="M5 11l4.5 4.5L17 7"
+                  stroke="#22C55E"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <p class="verified-heading">Verified!</p>
+            <p class="verified-subtext" id="completed-verifier-label">—</p>
+          </div>
+
+          <div class="verified-fields" id="verified-fields-container">
+            <!-- Rows populated by JS -->
+          </div>
+
+          <div class="timestamp-row">
+            <svg
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+            >
+              <circle cx="5" cy="5" r="4" />
+              <path d="M5 3v2l1.5 1.5" />
+            </svg>
+            <span id="completed-timestamp">—</span>
+          </div>
+        </div>
+
+        <!-- ─── STATE 4: REJECTED ─────────────────────── -->
+        <div class="state-panel" id="state-rejected">
+          <div class="rejected-header">
+            <div class="x-circle">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path
+                  d="M5 5l10 10M15 5L5 15"
+                  stroke="#EF4444"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </div>
+            <p class="rejected-heading">Rejected</p>
+            <p class="rejected-sub" id="rejected-sub-text">
+              You declined to share your credentials with this verifier.
+            </p>
+          </div>
+
+          <div
+            class="rejected-verifier"
+            id="rejected-verifier-row"
+            style="display: none"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="#525A72"
+              stroke-width="1.3"
+              stroke-linecap="round"
+            >
+              <rect x="1" y="3" width="12" height="9" rx="1.5" />
+              <path d="M1 6h12" />
+            </svg>
+            <span class="rejected-verifier-name" id="rejected-verifier-name"
+              >—</span
+            >
+          </div>
+        </div>
+      </div>
+      <!-- /content -->
+
+      <!-- ── FOOTER ───────────────────────────────────── -->
+      <div class="popup-footer">
+        <span class="footer-text">v1.0.0</span>
+        <a href="#" class="footer-link" id="open-dashboard-footer"
+          >Open Dashboard →</a
+        >
       </div>
     </div>
+    <!-- /popup-wrapper -->
 
-  </div><!-- /content -->
-
-  <!-- ── FOOTER ───────────────────────────────────── -->
-  <div class="popup-footer">
-    <span class="footer-text">v1.0.0</span>
-    <a href="#" class="footer-link" id="open-dashboard-footer">Open Dashboard →</a>
-  </div>
-
-</div><!-- /popup-wrapper -->
-
-<script src="qrcode.vendor.js"></script>
-<script src="popup.js"></script>
-</body>
+    <script src="qrcode.vendor.js"></script>
+    <script src="popup.js"></script>
+  </body>
 </html>

@@ -1,46 +1,116 @@
-# NexusID — Phase 5: Extension popup redesign (2026-11-24)
+# ▶ RESUME HERE (updated 2026-11-25, 00:45 PKT)
+
+**Where we are:** Phases 0 → 5 of `docs/DEMO_BUILD.md` §4 are done. Phase 5 (extension) is verified live in Chrome.
+**Next:** Phase 6, mobile wallet (prompt in `docs/DEMO_BUILD.md` → "Phase 6"). Optional quick checks first, see "Open items".
+
+## Demo story status (DEMO_BUILD.md §1)
+
+| # | Step | State |
+|---|------|-------|
+| 1 | Landing page | Exists (Phase 7/8 polish) |
+| 2 | SP portal: Shop A registers, key, `AGE_OVER_18` | Done (Phase 3) |
+| 3–4 | Phone wallet + add credential | **Phase 6.** Web stand-in works: `/dashboard/credentials` → Add → NADRA |
+| 5 | Extension pairing QR → "Paired" | **Done, verified live** |
+| 6 | Shop A detected by extension + desktop notification | **Done, verified live** |
+| 7–8 | Phone request + fingerprint + proof | **Phase 6.** Web stand-in works: `/dashboard/requests` → Approve / Decline |
+| 9 | Popup Verified + shop unlocks | **Done, verified live** (3 × VERIFIED) |
+| 10 | SP dashboard log, no personal data | Done (Phase 3) |
+| 11 | Negative cases | Decline **verified live**. Expired not yet watched live. Replay rejected (backend tests) |
+| 12 | History (phone + web) | Web `/dashboard/history` fixed (time-zone bug) and shows the entries. Phone = Phase 6 |
+
+## How to run and test (from scratch)
+
+1. `docker start nexusid-postgres` (if stopped), then `bash dev-start.sh` → backend :4000, web :3000, Shop A :3001.
+2. **Issuers are NOT started by `dev-start.sh`.** Start each in its own terminal so you can see its output:
+   `npm run dev --workspace=services/issuers/nadra` (:4001), likewise `hec` (:4002), `air-university` (:4003).
+   The NADRA **sandbox OTP** is printed in that terminal: `[SANDBOX] OTP for session …: 123456`.
+   (Tonight NADRA was running in the background from an earlier Claude session, logging to
+   `/tmp/claude-1000/-home-safi-Documents-nexusid/908130ef-3673-4745-b434-79feb95e245d/scratchpad/issuer-nadra.log`.
+   That path is temporary; after a reboot use your own terminal.)
+3. Extension: `npm run build -w apps/extension` → `chrome://extensions` → Developer mode → **Load unpacked**
+   → pick `apps/extension` (the folder, not `dist/`). After code changes: rebuild, click the card's reload arrow, reload
+   the Shop A tab (content scripts only attach to pages loaded after the extension).
+4. End User (web stand-in for the phone): sign in at `localhost:3000/auth/login` (End User tab).
+   Your account: **`admin@nexusid.com`** (it holds the NADRA credential, the live pairing and tonight's history).
+   Shop A provider login: `shop-a@nexusid.demo` / `ShopA-Demo-2026` (API key `nxk_shop_a_demo_key_2026`).
+5. Add credential: Dashboard → Credentials → Add → NADRA, any CNIC (dashes auto-insert), any `03…` number, OTP from
+   the NADRA terminal. Sandbox always returns DOB 2000-01-15 → over 18.
+6. Pair (until the phone app scans): open the popup → right-click → Inspect → Console:
+   `chrome.storage.local.get('nexusid_pairing').then(r => console.log(r.nexusid_pairing.qrPayload))`
+   → open the printed `localhost:3000/pair#…` link in the signed-in tab within 120 s → popup "Paired ✓" → Ready.
+7. Verify: new tab `localhost:3001` → start verification → notification + popup "Waiting for your phone…"
+   → `localhost:3000/dashboard/requests` → Approve (or Decline) → popup + shop update within ~2 s.
+
+## Open items (carry forward)
+
+- **Watch the Expired state live:** reload Shop A, don't approve, wait 2 min → popup amber EXPIRED, shop "Try again".
+- **Web holder key is per browser, not per account** (`apps/web/lib/webKeypair.ts`, IndexedDB `signing-keypair`).
+  Signing in as a different End User in the same Chrome profile → pairing/credentials fail
+  ("No device key is registered"). Fix: key the vault entry by user ID, or re-register on account change.
+  Workaround: one End User account per Chrome profile.
+- **Stale session cookie:** if the account behind the cookie was deleted, web actions failed with "Record not found".
+  `PUT /users/me/public-key` now says "sign out and sign in again"; other routes may still show the generic message.
+- **Device name** in the popup shows "NexusID wallet" for web pairings (no `device_info.model`); the phone app will send it.
+- Popup "Open portal" opens `http://localhost:3000` (hard-coded in `apps/extension/src/shared/config.ts`).
+- CLAUDE.md says DB name `nexusid`; it is actually **`nexusid_db`** (tests use `nexusid_db_test`).
+- Dev DB has throwaway `diag…@example.test` users from tonight's API checks, harmless.
+
+## Git state: NOTHING COMMITTED since `d087139 Phase 3`
+
+Uncommitted work = Phase 4 (`apps/demo-shop/`, `dev-start.sh`, root `package.json`) + Phase 5 (below) + tonight's fixes.
+`package-lock.json` changed (adds `@types/chrome` for the new `apps/extension` workspace).
+Suggested: commit Phase 4 and Phase 5 as two commits before starting Phase 6.
+
+---
+
+# NexusID — Phase 5: Extension popup redesign (2026-11-24 → verified 2026-11-25)
 
 SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2 OutcomeBadge, §5.6 PredicateChip).
 
 ## Extension (`apps/extension`)
-- Now TypeScript bundled by esbuild (`npm run build -w apps/extension` → `dist/`); `@types/chrome` 0.3.7. Load the
-  `apps/extension` folder unpacked; `manifest.json` points at `dist/background.js`, `popup.html` loads `dist/popup.js`.
-  Old `background.js`, `popup.js`, `config.js` removed. `content.js` unchanged (same message protocol; Shop A unaffected).
-- Popup states: loading skeleton → Not paired (QR via API-023, 120 s ring turning warning at 30 s / danger at 10 s, blur +
-  "Code expired · New code", "Paired ✓" moment) → Paired idle (device name, inline Unpair confirm, no dialogs) → Request
-  pending (platform, host, PredicateChip with mono code, pulsing "Waiting for your phone…", session countdown) →
-  Verified (drawn check) / Failed / Declined / Expired with Dismiss. Error state with Retry when the backend is down.
-  Predicate labels/colours come from `packages/types` (aliased to source in the build).
-- Worker: relay API-032 with pairing token, poll API-033 with poll secret. `chrome.alarms` (30 s, Chrome's minimum) is the
-  durable scheduler that survives worker suspension; a 2 s loop runs while the worker is awake, and the open popup nudges
-  it every 2 s. FR-033 notifications on relay ("Shop A asks: Age over 18 — check your phone") and on every outcome.
-  Action badge shows pending/verified. Popup never shows claim values.
+- **Now a TypeScript workspace** (`@nexusid/extension`) bundled by esbuild (`build.mjs`, `npm run build|watch|typecheck
+  -w apps/extension` → `dist/`, git-ignored). `@types/chrome` 0.3.7. `manifest.json` (v1.1.0) points at
+  `dist/background.js`; `popup.html` loads `qrcode.vendor.js` + `dist/popup.js`; styles in `popup.css` (CSS variables
+  from DESIGN §3, not Tailwind). Old `background.js`, `popup.js`, `config.js` deleted.
+- Files: `src/background/index.ts` (worker), `src/popup/popup.ts` (views), `src/shared/{config,state,icons}.ts`
+  (`icons.ts` is generated from lucide-react icon data, no React in the bundle).
+- `content.js` unchanged (plain JS, same message protocol, so Shop A is unaffected). Not converted to TS yet.
+- Popup states: loading skeleton → Not paired (QR via API-023, 120 s ring → amber at 30 s / red at 10 s, blur +
+  "Code expired · New code", "Paired ✓" moment, screen-reader announcements at 30/10 s) → Paired idle (device name,
+  inline Unpair confirm, no dialogs) → Request pending (platform, host, PredicateChip + mono code, pulsing
+  "Waiting for your phone…", session countdown) → Verified (drawn check) / Failed / Declined / Expired + Dismiss.
+  Error state with Retry when the backend is down. Labels/colours from `packages/types` (build aliases the source).
+- Worker: relay API-032 with pairing token, poll API-033 with poll secret. `chrome.alarms` (30 s, Chrome's minimum) is
+  the durable scheduler surviving worker suspension; a 2 s loop runs while awake, and an open popup nudges it every 2 s.
+  FR-033 notifications on relay ("Shop A asks: Age over 18 — check your phone") and on every outcome. Toolbar badge for
+  pending/verified. Storage keys: `nexusid_pairing`, `nexusid_request` (poll secret dropped once final). v1.0 storage is
+  migrated/cleaned on install. Popup never shows claim values.
 - Permissions: storage, notifications, alarms, activeTab, scripting.
 
 ## Backend
-- API-024 `GET /qr-challenges/:id` now also returns `active` and `deviceName` (from `users.device_info.model`).
-- New `DELETE /api/v1/pairings/self` (x-pairing-token): the extension revokes its own pairing on Unpair (idempotent, audited).
-- Backend tests: 100/100 pass.
+- API-024 `GET /qr-challenges/:id` (and redeem) now also return `active` and `deviceName` (from `users.device_info.model`).
+- New `DELETE /api/v1/pairings/self` (header `x-pairing-token`): extension revokes its own pairing on Unpair
+  (idempotent, audited `device_pairing_revoked` with `by: extension`).
+- `PUT /users/me/public-key`: 401 "account no longer exists, sign out and sign in again" instead of Prisma's
+  "Record not found" (stale cookie for a deleted user).
+- Backend tests 100/100 pass (re-run 2026-11-25 after all changes). Extension typecheck clean.
 
-## Verified live (2026-11-25, in Chrome)
-- Step 5: popup QR → `/pair` link → popup "Paired ✓" → Ready. Unpair from the popup revoked the pairing server-side.
-- Steps 6 + 9: three Shop A sessions relayed by the extension and completed VERIFIED after approval on
-  `/dashboard/requests` (web stand-in for the phone).
-- Not yet exercised live: Declined / Expired popup states (step 11).
+## Web fixes found during the live check
+- `components/AddCredentialModal.tsx` `apiFetch` returned the `{ success, data }` envelope, so NADRA verify-otp got
+  `session_id: undefined` (Zod "expected string, received undefined") and **every issuer's credential (NADRA, HEC,
+  AU, LinkedIn) was dropped before reaching the browser wallet**. Now unwraps `data`. Any credential added before this
+  fix is not in the browser wallet; re-add it.
+- Input masks: CNIC auto-dashes as typed (`3520212345678` → `35202-1234567-8`), phone strips spaces/dashes
+  (`0300-1234567` → `03001234567`), OTP digits only (max 6).
+- `app/dashboard/history/page.tsx`: "today" came from the UTC date while the range end was parsed as local time, so in
+  PKT 00:00–05:00 the day's entries were filtered out and every total showed 0. Now uses local dates on both ends.
 
-## Fixes found during the live check
-- Web `AddCredentialModal` `apiFetch` returned the `{ success, data }` envelope, so NADRA's verify-otp got
-  `session_id: undefined` (Zod "expected string") and every issuer's credential was dropped before reaching the
-  browser wallet. It now unwraps `data`. Added input masks: CNIC auto-dashes (12345-1234567-1), phone strips
-  spaces/dashes, OTP digits only.
-- `PUT /users/me/public-key` returns 401 "account no longer exists, sign in again" instead of Prisma's
-  "Record not found" when the session token points at a deleted user (stale cookie).
-- History page (`/dashboard/history`) built "today" from the UTC date but parsed the range end as local time, so
-  in PKT between 00:00 and 05:00 the day's entries were filtered out and all totals showed 0. Now uses local dates.
-- Declined state verified live (2 Shop A requests declined on `/dashboard/requests`).
-- Known: the web holder key is stored once per browser, not per account. Switching End User accounts in one Chrome
-  profile breaks pairing ("No device key is registered"). Use one account per profile for the demo.
-- Dev DB: a few `diag…@example.test` users were created by these checks.
+## Verified live in Chrome (2026-11-25)
+- Pairing via `/pair` link → popup "Paired ✓" → Ready. Unpair revoked server-side (pairing row `revoked`).
+- 3 Shop A sessions relayed → approved on `/dashboard/requests` → VERIFIED (popup, notification, shop unlock).
+- 2 Shop A sessions declined → DECLINED.
+- History page shows the 5 entries after the time-zone fix.
+- Not watched live: Expired, Failed (backend tests cover FAILED), backend-down error screen.
 
 ---
 

@@ -35,6 +35,9 @@ SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2
   spaces/dashes, OTP digits only.
 - `PUT /users/me/public-key` returns 401 "account no longer exists, sign in again" instead of Prisma's
   "Record not found" when the session token points at a deleted user (stale cookie).
+- History page (`/dashboard/history`) built "today" from the UTC date but parsed the range end as local time, so
+  in PKT between 00:00 and 05:00 the day's entries were filtered out and all totals showed 0. Now uses local dates.
+- Declined state verified live (2 Shop A requests declined on `/dashboard/requests`).
 - Known: the web holder key is stored once per browser, not per account. Switching End User accounts in one Chrome
   profile breaks pairing ("No device key is registered"). Use one account per profile for the demo.
 - Dev DB: a few `diag…@example.test` users were created by these checks.

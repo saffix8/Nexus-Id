@@ -144,8 +144,12 @@ function exportCSV(rows: VerificationRow[]) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** YYYY-MM-DD in the viewer's local calendar (toISOString would give the UTC date,
+ *  which in Pakistan (UTC+5) is still "yesterday" until 05:00 and hid today's entries). */
 function isoDate(d: Date) {
-  return d.toISOString().split('T')[0];
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 function formatRelative(iso: string): string {
@@ -235,12 +239,13 @@ export default function AnalyticsPage() {
     setLoading(true);
     setPage(1);
     try {
-      const from = new Date(fromDate);
+      // Both ends in local time; a bare "YYYY-MM-DD" would parse as UTC midnight.
+      const from = new Date(`${fromDate}T00:00:00`);
       const to = new Date(`${toDate}T23:59:59.999`);
       setData(buildPayload(await fetchHistory(), from, to));
     } catch {
       // Honest empty state — never invented numbers.
-      setData(buildPayload([], new Date(fromDate), new Date(toDate)));
+      setData(buildPayload([], new Date(`${fromDate}T00:00:00`), new Date(`${toDate}T23:59:59.999`)));
     } finally {
       setLoading(false);
     }

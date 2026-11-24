@@ -1,3 +1,82 @@
+# NexusID — Phase 0 Audit (2026-11-24, demo story in docs/DEMO_BUILD.md §1)
+
+Phase 0 of docs/DEMO_BUILD.md §4. Every later phase starts from this section.
+No code was changed for this audit. Backend tests ran against `nexusid_db_test`.
+
+**Main finding:** there is no predicate catalog in the code. No `AGE_OVER_18`
+appears in any service, package or app. Credentials carry raw fields such as
+`degree_title`, and outcomes carry raw values. Step 10 ("your strongest
+moment") currently shows the opposite of the privacy claim.
+
+## Demo story, step by step
+
+| #   | Step                                       | Verdict                           | Files involved                                                                                                                                             | What's missing                                                                                                                                                                                                                                                                                           |
+| --- | ------------------------------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Landing                                    | **WORKS**                         | `apps/web/app/page.tsx`                                                                                                                                    | Headline "Prove what matters. Hide what doesn't." is there. Only the Phase 8 restyle is left.                                                                                                                                                                                                            |
+| 2   | SP registers, API key, ticks `AGE_OVER_18` | **PARTIAL**                       | `app/auth/provider-register`, `app/verifier/api-keys`, `app/verifier/create`, `services/backend/src/services/verifier-account.service.ts`                  | Registration, show-once key and rotation work and are tested. No predicate catalog, no API-045/046. `verifier/create` only builds a snippet in the browser from raw field keys (`age`, `age_over_18`, `degree_title`) and saves nothing. Route drift from the SRS: `/verifiers/register`, `/me/api-key`. |
+| 3   | Phone wallet shows cards                   | **MISSING**                       | `apps/mobile/App.tsx`, `apps/mobile/src/**`                                                                                                                | `App.tsx` is the React Native template screen. `package.json` has no react-native dependencies and none are installed. The screens in `src/` are never wired in. Stand-in: web wallet (`app/dashboard/credentials`). No biometric gate (FR-015).                                                         |
+| 4   | Add NADRA credential live                  | **PARTIAL**                       | `services/issuers/nadra/src/routes.ts`, `apps/web/components/AddCredentialModal.tsx`                                                                       | CNIC → OTP → credential works from the web modal. No phone flow. **Bug:** issuers use Zod 4.5.4, where `parsed.error.errors` is undefined, so invalid input throws a 500 instead of a 400 with a message (NADRA, AU, LinkedIn).                                                                          |
+| 5   | Extension pairing QR                       | **PARTIAL**                       | `apps/extension/popup.js`, `background.js`, `services/backend/src/services/qr-challenge.service.ts`, `pairing.service.ts`                                  | Extension QR has a countdown and an expired state. API-023–027 tested (single use, expiry). No phone scanner; pairing goes through web `/pair`.                                                                                                                                                          |
+| 6   | Shop A checkout detected                   | **PARTIAL**                       | `demo/sp-server.mjs` (:5500), `apps/extension/content.js`                                                                                                  | Snippet detection and relay work. Demo site is "Demo Job Portal" asking for `degree_title`/`university`. No Shop A, no age check, no locked checkout, not in `dev-start.sh`.                                                                                                                             |
+| 7   | Push → request on phone                    | **MISSING** (phone)               | `services/backend/src/services/notification.service.ts`, `apps/web/app/dashboard/requests/page.tsx`                                                        | FCM code exists but nothing registers a push token. Web stand-in shows a minutes countdown (not 120 s) and the decoded raw values instead of "WILL BE CONFIRMED: Age over 18" / "NEVER SHARED: …".                                                                                                       |
+| 8   | Fingerprint → proof → verified             | **PARTIAL**                       | `packages/sd-jwt/src/holder.ts`, `apps/web/lib/webHolder.ts`, `packages/sd-jwt/src/verifier.ts`                                                            | ALG-001 runs in the browser with a WebCrypto key, not Android Keystore. No fingerprint, no 3-step progress. ALG-002 on the backend is solid (signature, KB-JWT, nonce, 60 s proof age, revocation).                                                                                                      |
+| 9   | Popup **Verified** + shop unlocks          | **PARTIAL**                       | `apps/extension/popup.js`, `background.js`, `demo/sp-server.mjs`                                                                                           | Polling API-033 → Verified works. The popup lists verified field values. Polling uses `setInterval`, not `chrome.alarms`, so it stops when the service worker is shut down. No distinct Failed/Expired states. No checkout unlock.                                                                       |
+| 10  | SP log, no PII                             | **PARTIAL (privacy claim fails)** | `apps/web/app/verifier/dashboard/page.tsx`, `services/backend/src/services/verification.service.ts`, `schema.prisma` (`VerificationResult.verifiedFields`) | Log exists but shows raw field names. `verification_results.verified_fields` stores claim values and the outcome includes `verifiedFields` (breaks BR-015 / NFR-010). Page fetches once, no auto-refresh.                                                                                                |
+| 11  | Decline / expire / replay                  | **PARTIAL**                       | `services/backend/src/routes/verification.route.ts`, `src/__tests__/verification-flow.test.ts` (Tests 5, 7, 8)                                             | All three work on the backend and are tested. Expiry is checked only on read; no ALG-005 cron. API-037 (fail) missing. No phone UI; popup has no Expired state.                                                                                                                                          |
+| 12  | History on phone + web                     | **PARTIAL**                       | `apps/web/app/dashboard/history/page.tsx`, API-038                                                                                                         | Web history works. Phone history not runnable. No delete (API-039/040).                                                                                                                                                                                                                                  |
+
+## Infrastructure checks
+
+- **`dev-start.sh`:** starts only Postgres, the backend and the web app. It does
+  not start the 4 issuers, ML or the demo shop. All 7 services answered
+  `/health` with 200 during the audit, but they had been started separately.
+  The script was not run (all ports in use). Minor: the `&& || &&` chain on
+  the Postgres step prints "Started" even when the container was already healthy.
+- **`npx tsc --noEmit`:**
+  - Pass: `services/backend`, `apps/web`, `packages/sd-jwt`, root project references.
+  - **Fail: `packages/types`** — TS18003: `index.ts` is at the package root but
+    the tsconfig only includes `src/**`.
+  - **No tsconfig:** the 4 issuers, `apps/mobile`, `apps/extension` (plain JS).
+    A one-off check of the issuers finds 16 errors: the Zod `.errors` bug
+    (real runtime bug), plus HEC import extensions and `unknown` catch errors.
+- **Tests:** backend Jest 65/65 pass against `nexusid_db_test`.
+- **Seed data:** `npm run db:seed` (`services/backend/src/db/seed.ts`) seeds the
+  4 issuers (the database holds real keys, not placeholders), "Demo Job
+  Portal" with key `demo_api_key_12345`, and a demo user with a placeholder
+  public key.
+  - No `seed:demo`, no Shop A, no `AGE_OVER_18`, no demo credentials.
+  - The dev database holds leftover test data: 7 verifiers (3 duplicate
+    "VerifyFlow SP" rows from `scripts/verify-flow.mjs`), 28 users, 27 pairings.
+- **Doc drift:** CLAUDE.md says the database is `nexusid`; it is `nexusid_db`.
+  `docs/SRS.md` is empty (0 bytes).
+
+## Fix list, in order
+
+1. **Predicate catalog end to end (fold into Phase 1).** The 9 codes in
+   `packages/types`; issuers sign predicate claims; sessions take a configured
+   predicate; API-045/046 save requirements; outcome and `verification_results`
+   hold only predicate, outcome, proof hash and issuer. Steps 2, 6, 7, 9 and 10
+   depend on this.
+2. **`seed:demo` + demo reset:** Shop A with a known key and `AGE_OVER_18`;
+   clear leftover verifiers, users and pairings. Fix the `packages/types`
+   tsconfig in the same pass.
+3. **Issuer Zod bug:** `.errors` → `.issues` in the 4 issuer route files; add
+   tsconfigs to the issuers so `tsc` catches this kind of bug.
+4. **Remaining backend gaps:** API-037 fail, ALG-005 expiry cron, API-039/040
+   history delete.
+5. **`dev-start.sh`:** start the issuers, ML and the shop; fix the Postgres-step chain.
+6. **Phase 3, SP portal:** requirements page that saves; dashboard refreshing
+   every 3 s with predicate and outcome columns.
+7. **Phase 4:** Shop A checkout page that unlocks on VERIFIED.
+8. **Phase 5, extension:** remove field values from the popup, add Expired and
+   Failed states, move polling to `chrome.alarms`.
+9. **Phase 6, mobile:** make it runnable (dependencies, wire `App.tsx` to
+   `src/navigation`), then scan QR, push, consent with biometrics, on-device
+   proof, history. Biggest risk; the web stand-in is the fallback, so decide early.
+10. **Phase 7/8:** user portal history delete, polish.
+
+---
+
 # NexusID — FYP Status Snapshot (2026-11-24, /fyp-status vs docs/REQUIREMENTS.md)
 
 Checked against the real tree, not prior notes. Typecheck clean (backend, web,
@@ -7,46 +86,46 @@ note they label some FRs wrongly (see "Doc corrections").
 
 ## 1. Complete — with proof
 
-| Item | Proof |
-|---|---|
-| FR-001 Registration · API-017/018 | services/backend/src/controllers/web-auth.controller.ts |
-| FR-003 Pairing · FR-031 QR · API-023–027 · ALG-006 | services/backend/src/services/qr-challenge.service.ts, pairing.service.ts, apps/extension/background.js |
-| FR-004 Issuer registry · API-012/013 | services/backend/src/routes/issuers.route.ts |
-| FR-006/007 Issuance (all 4 issuers, holder-bound `cnf.jwk`, no `sub`) · API-003–010 | services/issuers/*/src/credential-builder.ts, packages/sd-jwt/src/issuer.ts |
-| FR-010 View credentials (web) · FR-012 encrypted at rest (web) | apps/web/app/dashboard/credentials/page.tsx, apps/web/lib/webVault.ts |
-| FR-016 Expiry enforced at verify (issuer `exp`) | packages/sd-jwt/src/verifier.ts (jwtVerify) |
-| FR-020/021/022/023 Summary, approve, prove, decline (web stand-in) · API-034/036 | apps/web/app/dashboard/requests/page.tsx, apps/web/lib/webHolder.ts |
-| FR-026/027 Proof generation + submit · ALG-001 | packages/sd-jwt/src/holder.ts, apps/web/lib/webHolder.ts |
-| FR-028 History · API-038 | apps/web/app/dashboard/history/page.tsx |
-| FR-032/033/034 Detect+relay, in-browser notice, result · API-032/033 | apps/extension/content.js, background.js (chrome.notifications) |
-| FR-035 Role selection | apps/web/app/auth/login/page.tsx |
-| FR-038 User dashboard (pairings + history) | apps/web/app/dashboard/devices/page.tsx |
-| FR-039/040 SP registration, hashed API key, rotation · ALG-009 | services/backend/src/services/verifier-account.service.ts |
-| FR-042 SP dashboard · API-047/048 | services/backend/src/routes/analytics.route.ts, apps/web/app/verifier/ |
-| FR-043 Session + backend nonce · API-030/031 | services/backend/src/services/verification.service.ts |
-| FR-044 / ALG-002 VerifyProof: issuer sig, disclosures, KB-JWT, holder binding, nonce, aud, proof age ≤60 s, exact-field match, revocation · ALG-003 | packages/sd-jwt/src/verifier.ts, verification.service.ts submitProof |
-| API-049–051 Portal auth proxy | apps/web/app/api/auth |
+| Item                                                                                                                                                | Proof                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| FR-001 Registration · API-017/018                                                                                                                   | services/backend/src/controllers/web-auth.controller.ts                                                 |
+| FR-003 Pairing · FR-031 QR · API-023–027 · ALG-006                                                                                                  | services/backend/src/services/qr-challenge.service.ts, pairing.service.ts, apps/extension/background.js |
+| FR-004 Issuer registry · API-012/013                                                                                                                | services/backend/src/routes/issuers.route.ts                                                            |
+| FR-006/007 Issuance (all 4 issuers, holder-bound `cnf.jwk`, no `sub`) · API-003–010                                                                 | services/issuers/*/src/credential-builder.ts, packages/sd-jwt/src/issuer.ts                             |
+| FR-010 View credentials (web) · FR-012 encrypted at rest (web)                                                                                      | apps/web/app/dashboard/credentials/page.tsx, apps/web/lib/webVault.ts                                   |
+| FR-016 Expiry enforced at verify (issuer `exp`)                                                                                                     | packages/sd-jwt/src/verifier.ts (jwtVerify)                                                             |
+| FR-020/021/022/023 Summary, approve, prove, decline (web stand-in) · API-034/036                                                                    | apps/web/app/dashboard/requests/page.tsx, apps/web/lib/webHolder.ts                                     |
+| FR-026/027 Proof generation + submit · ALG-001                                                                                                      | packages/sd-jwt/src/holder.ts, apps/web/lib/webHolder.ts                                                |
+| FR-028 History · API-038                                                                                                                            | apps/web/app/dashboard/history/page.tsx                                                                 |
+| FR-032/033/034 Detect+relay, in-browser notice, result · API-032/033                                                                                | apps/extension/content.js, background.js (chrome.notifications)                                         |
+| FR-035 Role selection                                                                                                                               | apps/web/app/auth/login/page.tsx                                                                        |
+| FR-038 User dashboard (pairings + history)                                                                                                          | apps/web/app/dashboard/devices/page.tsx                                                                 |
+| FR-039/040 SP registration, hashed API key, rotation · ALG-009                                                                                      | services/backend/src/services/verifier-account.service.ts                                               |
+| FR-042 SP dashboard · API-047/048                                                                                                                   | services/backend/src/routes/analytics.route.ts, apps/web/app/verifier/                                  |
+| FR-043 Session + backend nonce · API-030/031                                                                                                        | services/backend/src/services/verification.service.ts                                                   |
+| FR-044 / ALG-002 VerifyProof: issuer sig, disclosures, KB-JWT, holder binding, nonce, aud, proof age ≤60 s, exact-field match, revocation · ALG-003 | packages/sd-jwt/src/verifier.ts, verification.service.ts submitProof                                    |
+| API-049–051 Portal auth proxy                                                                                                                       | apps/web/app/api/auth                                                                                   |
 
 ## 2. Claimed by the docs, missing from the code
 
-| Requirement | Gap |
-|---|---|
-| FR-005 Predicate catalog · BR-021 | No predicate code (`AGE_OVER_18` …) anywhere in services/packages/apps. Credentials carry raw fields. |
-| FR-041 · API-045/046 Verifier requirements | No `/verifiers/requirements` routes; sessions take free-form `requestedFields` |
-| FR-045 AC / BR-015 / NFR-010 Predicate-only outcome | Outcome and `verification_results.verified_fields` hold raw values |
-| FR-002 / BR-017 / CON-009 Android Keystore key | apps/mobile is the RN template (`App.tsx` = NewAppScreen, no RN deps). Web WebCrypto key stands in |
-| FR-019 / NFR-007 Push to phone | FCM code exists; nothing registers a push token (no runnable mobile) |
-| FR-036 QR sign-in (purpose SIGN_IN) | Not built |
-| FR-037 Recovery · API-011 `/reverify` (all issuers) · API-028/029 | No reverify route on any issuer; no `/recovery/*` |
-| API-021 `/users/challenge` · ALG-007 | Missing. API-020 `/users/login` verifies a **client-supplied** challenge → a captured signature can be replayed forever |
-| FR-017 / ALG-008 / API-041 Issuer-signed revocation | Missing. Only user-initiated `/credentials/:id/revoke` exists (not in SRS) |
-| FR-018 / ALG-004 / API-014–016 credential-records | Missing (wallet uses `/credentials` instead) |
-| FR-024 / ALG-005 Session-expiry cron | No job; expiry is checked lazily on access |
-| FR-025 / API-037 `/verification/fail/:id` | Missing (web shows "No matching credential" but never reports) |
-| FR-030 / API-039/040 History delete | Missing |
-| FR-009 Profile edit · FR-011 delete credential · FR-013/014 invalidate + re-issue · FR-015 in-app auth · FR-008 ID upload | Missing |
-| NFR-019 SP rate limit (60/min) | Missing (only AU issuer is rate-limited) |
-| ML fraud scoring wired to issuers | ML :5001 healthy, never called |
+| Requirement                                                                                                               | Gap                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| FR-005 Predicate catalog · BR-021                                                                                         | No predicate code (`AGE_OVER_18` …) anywhere in services/packages/apps. Credentials carry raw fields.                   |
+| FR-041 · API-045/046 Verifier requirements                                                                                | No `/verifiers/requirements` routes; sessions take free-form `requestedFields`                                          |
+| FR-045 AC / BR-015 / NFR-010 Predicate-only outcome                                                                       | Outcome and `verification_results.verified_fields` hold raw values                                                      |
+| FR-002 / BR-017 / CON-009 Android Keystore key                                                                            | apps/mobile is the RN template (`App.tsx` = NewAppScreen, no RN deps). Web WebCrypto key stands in                      |
+| FR-019 / NFR-007 Push to phone                                                                                            | FCM code exists; nothing registers a push token (no runnable mobile)                                                    |
+| FR-036 QR sign-in (purpose SIGN_IN)                                                                                       | Not built                                                                                                               |
+| FR-037 Recovery · API-011 `/reverify` (all issuers) · API-028/029                                                         | No reverify route on any issuer; no `/recovery/*`                                                                       |
+| API-021 `/users/challenge` · ALG-007                                                                                      | Missing. API-020 `/users/login` verifies a **client-supplied** challenge → a captured signature can be replayed forever |
+| FR-017 / ALG-008 / API-041 Issuer-signed revocation                                                                       | Missing. Only user-initiated `/credentials/:id/revoke` exists (not in SRS)                                              |
+| FR-018 / ALG-004 / API-014–016 credential-records                                                                         | Missing (wallet uses `/credentials` instead)                                                                            |
+| FR-024 / ALG-005 Session-expiry cron                                                                                      | No job; expiry is checked lazily on access                                                                              |
+| FR-025 / API-037 `/verification/fail/:id`                                                                                 | Missing (web shows "No matching credential" but never reports)                                                          |
+| FR-030 / API-039/040 History delete                                                                                       | Missing                                                                                                                 |
+| FR-009 Profile edit · FR-011 delete credential · FR-013/014 invalidate + re-issue · FR-015 in-app auth · FR-008 ID upload | Missing                                                                                                                 |
+| NFR-019 SP rate limit (60/min)                                                                                            | Missing (only AU issuer is rate-limited)                                                                                |
+| ML fraud scoring wired to issuers                                                                                         | ML :5001 healthy, never called                                                                                          |
 
 Path drift (works, but not the SRS path): API-042 is `/verifiers/register`,
 API-043/044 are `GET /verifiers/me` + `POST /verifiers/me/api-key`.

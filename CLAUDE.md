@@ -12,7 +12,7 @@
 | Backend | `http://localhost:4000` |
 | Web portal | `http://localhost:3000` |
 | Postgres | Docker container `nexusid-postgres`, port 5432 |
-| DB name | `nexusid` |
+| DB name | `nexusid_db` (tests use `nexusid_db_test`) |
 
 ---
 
@@ -84,11 +84,11 @@ npx tsc --noEmit
 
 # Tests
 npm test --workspace=services/backend
-npm test --workspace=packages/sd-jwt
+node scripts/verify-flow.mjs              # end-to-end lifecycle check (stack must be up); sd-jwt has no unit tests
 
 # Prisma (ALWAYS use --schema flag)
 npx prisma generate --schema=services/backend/prisma/schema.prisma
-npx prisma migrate status --schema=services/backend/prisma/schema.prisma
+npx prisma migrate status --schema=services/backend/prisma/schema.prisma   # run from services/backend if DATABASE_URL isn't found (see Prisma notes)
 npx prisma migrate dev --schema=services/backend/prisma/schema.prisma --name <migration_name>
 npx prisma studio --schema=services/backend/prisma/schema.prisma
 
@@ -113,15 +113,20 @@ docker compose -f infra/docker-compose.yml ps
 - Schema is at `services/backend/prisma/schema.prisma` — NOT at repo root
 - Every prisma CLI command MUST include `--schema=services/backend/prisma/schema.prisma`
 - Running without `--schema` will silently use a wrong path
+- `DATABASE_URL` is only found when the CLI runs from `services/backend` — from the repo root it fails with P1012. Use:
+  `cd services/backend && npx prisma migrate status --schema=prisma/schema.prisma`
 
 ### SD-JWT Package
 - Three named exports: `@nexusid/sd-jwt/issuer`, `@nexusid/sd-jwt/holder`, `@nexusid/sd-jwt/verifier`
 - Uses SHA-256 digests and RSA-2048 signatures (CON-007, CON-008)
 - Proof generation (ALG-001) MUST happen on device — private key never leaves Android Keystore
+- `createCredential` takes `holderPublicKey` (SPKI PEM) and writes it as `cnf.jwk`; credentials carry NO `sub` — never put an identifier (CNIC, reg. no.) in always-visible claims
+- `verifyProof` enforces holder binding (`cnf.jwk` = submitting user's key), proof age ≤ 60 s, and (via `expectedFields`) exact match with the requested fields
+- The backend and issuers import `packages/sd-jwt/dist` — run `npm run build --workspace=packages/sd-jwt` after editing `src/`
 
 ### Issuer Services
 - Each issuer exposes `GET /.well-known/jwks.json` for public key
-- Each issuer exposes `POST /api/v1/credentials/{type}/reverify` for account recovery
+- `POST /api/v1/credentials/{type}/reverify` (API-011, account recovery) is in the SRS but NOT implemented on any issuer yet
 - NADRA uses 2-step: `POST /verify` → OTP → `POST /verify-otp`
 - AU issuer rate-limited: 5 requests/minute per IP
 

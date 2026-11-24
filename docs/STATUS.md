@@ -1,3 +1,83 @@
+# NexusID — FYP Status Snapshot (2026-11-24, /fyp-status vs docs/REQUIREMENTS.md)
+
+Checked against the real tree, not prior notes. Typecheck clean (backend, web,
+sd-jwt). Backend Jest 65/65. `node scripts/verify-flow.mjs` 38/42 (the 3 FAILs
+are BR-015 ×2 and ML; 1 N/A). Older snapshots below are kept for history —
+note they label some FRs wrongly (see "Doc corrections").
+
+## 1. Complete — with proof
+
+| Item | Proof |
+|---|---|
+| FR-001 Registration · API-017/018 | services/backend/src/controllers/web-auth.controller.ts |
+| FR-003 Pairing · FR-031 QR · API-023–027 · ALG-006 | services/backend/src/services/qr-challenge.service.ts, pairing.service.ts, apps/extension/background.js |
+| FR-004 Issuer registry · API-012/013 | services/backend/src/routes/issuers.route.ts |
+| FR-006/007 Issuance (all 4 issuers, holder-bound `cnf.jwk`, no `sub`) · API-003–010 | services/issuers/*/src/credential-builder.ts, packages/sd-jwt/src/issuer.ts |
+| FR-010 View credentials (web) · FR-012 encrypted at rest (web) | apps/web/app/dashboard/credentials/page.tsx, apps/web/lib/webVault.ts |
+| FR-016 Expiry enforced at verify (issuer `exp`) | packages/sd-jwt/src/verifier.ts (jwtVerify) |
+| FR-020/021/022/023 Summary, approve, prove, decline (web stand-in) · API-034/036 | apps/web/app/dashboard/requests/page.tsx, apps/web/lib/webHolder.ts |
+| FR-026/027 Proof generation + submit · ALG-001 | packages/sd-jwt/src/holder.ts, apps/web/lib/webHolder.ts |
+| FR-028 History · API-038 | apps/web/app/dashboard/history/page.tsx |
+| FR-032/033/034 Detect+relay, in-browser notice, result · API-032/033 | apps/extension/content.js, background.js (chrome.notifications) |
+| FR-035 Role selection | apps/web/app/auth/login/page.tsx |
+| FR-038 User dashboard (pairings + history) | apps/web/app/dashboard/devices/page.tsx |
+| FR-039/040 SP registration, hashed API key, rotation · ALG-009 | services/backend/src/services/verifier-account.service.ts |
+| FR-042 SP dashboard · API-047/048 | services/backend/src/routes/analytics.route.ts, apps/web/app/verifier/ |
+| FR-043 Session + backend nonce · API-030/031 | services/backend/src/services/verification.service.ts |
+| FR-044 / ALG-002 VerifyProof: issuer sig, disclosures, KB-JWT, holder binding, nonce, aud, proof age ≤60 s, exact-field match, revocation · ALG-003 | packages/sd-jwt/src/verifier.ts, verification.service.ts submitProof |
+| API-049–051 Portal auth proxy | apps/web/app/api/auth |
+
+## 2. Claimed by the docs, missing from the code
+
+| Requirement | Gap |
+|---|---|
+| FR-005 Predicate catalog · BR-021 | No predicate code (`AGE_OVER_18` …) anywhere in services/packages/apps. Credentials carry raw fields. |
+| FR-041 · API-045/046 Verifier requirements | No `/verifiers/requirements` routes; sessions take free-form `requestedFields` |
+| FR-045 AC / BR-015 / NFR-010 Predicate-only outcome | Outcome and `verification_results.verified_fields` hold raw values |
+| FR-002 / BR-017 / CON-009 Android Keystore key | apps/mobile is the RN template (`App.tsx` = NewAppScreen, no RN deps). Web WebCrypto key stands in |
+| FR-019 / NFR-007 Push to phone | FCM code exists; nothing registers a push token (no runnable mobile) |
+| FR-036 QR sign-in (purpose SIGN_IN) | Not built |
+| FR-037 Recovery · API-011 `/reverify` (all issuers) · API-028/029 | No reverify route on any issuer; no `/recovery/*` |
+| API-021 `/users/challenge` · ALG-007 | Missing. API-020 `/users/login` verifies a **client-supplied** challenge → a captured signature can be replayed forever |
+| FR-017 / ALG-008 / API-041 Issuer-signed revocation | Missing. Only user-initiated `/credentials/:id/revoke` exists (not in SRS) |
+| FR-018 / ALG-004 / API-014–016 credential-records | Missing (wallet uses `/credentials` instead) |
+| FR-024 / ALG-005 Session-expiry cron | No job; expiry is checked lazily on access |
+| FR-025 / API-037 `/verification/fail/:id` | Missing (web shows "No matching credential" but never reports) |
+| FR-030 / API-039/040 History delete | Missing |
+| FR-009 Profile edit · FR-011 delete credential · FR-013/014 invalidate + re-issue · FR-015 in-app auth · FR-008 ID upload | Missing |
+| NFR-019 SP rate limit (60/min) | Missing (only AU issuer is rate-limited) |
+| ML fraud scoring wired to issuers | ML :5001 healthy, never called |
+
+Path drift (works, but not the SRS path): API-042 is `/verifiers/register`,
+API-043/044 are `GET /verifiers/me` + `POST /verifiers/me/api-key`.
+
+## 3. Empty, stubbed or unreferenced
+
+- Unreferenced: `services/backend/src/services/zkp.service.ts` (225 lines), `fraud-detection.service.ts` (41 lines); `circuits/age_verification.circom` (ZKP not in SRS)
+- Empty: `docs/SRS.md` (0 bytes, yet cited as source of truth), `apps/web/tsc-output.txt`, root file `NODE_OPTIONS=--experimental-vm-modules`
+- Stub: `apps/mobile/App.tsx` (RN sample app)
+- Strays: root `0`; tracked `tmp/` (copies of CLAUDE.md, REQUIREMENTS.md, rule files); `services/backend/*.mjs` ad-hoc scripts; `services/backend/src/db/schema.sql` (superseded by Prisma)
+- No test script in `packages/sd-jwt` (CLAUDE.md lists `npm test --workspace=packages/sd-jwt`)
+
+## 4. Open items — ranked by what blocks the defense demo
+
+1. **Mobile app not runnable** — 3 of 6 "must work" demo items are mobile. Web stand-in covers the flow; say so up front (docs/DEMO_SCRIPT.md).
+2. **FR-005 + FR-041 + BR-015 predicates** — the core privacy claim, and FR-041 is inside the portal demo item. ~1–2 days: issuer-signed predicate claims, requirements routes, outcome = predicate + VERIFIED/FAILED only.
+3. **API-020 replayable device login** — add API-021 server challenge (60 s, single-use). Small; a panel security question waiting to happen.
+4. **FR-017/ALG-008 issuer revocation** — the SRS model is issuer-revokes; ours is user-revokes. Be ready to explain or add API-041.
+5. **FR-036 QR sign-in** — High-priority FR, reuses the pairing QR machinery (purpose SIGN_IN).
+6. **FR-025/API-037 fail + FR-024/ALG-005 cron** — small backend items; lazy expiry already holds for the demo.
+7. **FR-037 recovery + `/reverify`** (nice-to-have per CLAUDE.md).
+8. **FR-030 history delete, FR-011/013/014, FR-009, FR-015, FR-008** — lower priority.
+9. **ML wiring, NFR-019 rate limit, extension TS + chrome.alarms.**
+
+## Doc corrections found
+
+- Older snapshots below mislabel FRs: "FR-029/033/034 Provider accounts" are FR-035/039/040; "FR-017 Notify platform" is FR-023 + FR-034.
+- CLAUDE.md: DB is `nexusid_db` (not `nexusid`); `prisma migrate status` only finds `DATABASE_URL` when run from `services/backend`; sd-jwt has no test script.
+
+---
+
 # NexusID — FYP Status Snapshot (2026-11-23, updated end of session)
 
 Supersedes the 2026-11-22 /fyp-status snapshot below for everything touched

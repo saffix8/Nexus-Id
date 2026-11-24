@@ -1,159 +1,272 @@
 "use client";
 
-// API key management (SRS UC-009, FR-034, BR-009). Keys are stored only as a
-// hash, so a key is visible exactly once — right after it is generated.
+// SCR-020 — API keys (FR-040, BR-009, ALG-009; DESIGN.md §6.1).
+// API-043 gives key data only (prefix, rotation time). API-044 generates/rotates
+// and returns the plaintext key once; it is held only in this page's state while
+// the dialog is open, and stored server-side only as a SHA-256 hash.
 
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { VerifierIntegrationCode } from "@/components/VerifierIntegrationCode";
+import { format, parseISO } from "date-fns";
+import { KeyRound, Loader2, RotateCw, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import {
-  rotateApiKey,
-  useVerifierProfile,
-  VERIFIER_PROFILE_KEY,
-  type IssuedApiKey,
-} from "@/lib/verifierApi";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  ApiKeyReveal,
+  CodeBlock,
+  EmptyState,
+  ErrorState,
+  maskedKey,
+} from "@/components/nexus";
+import { useApiKeyInfo, useRegenerateApiKey } from "@/lib/verifierApi";
 
-function formatDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+
+function formatDate(iso: string | null | undefined) {
+  return iso ? format(parseISO(iso), "d MMM yyyy, HH:mm") : "—";
 }
 
 export default function ApiKeysPage() {
-  const queryClient = useQueryClient();
-  const { data: profile, isLoading, isError } = useVerifierProfile();
-  const [confirming, setConfirming] = useState(false);
-  const [issued, setIssued] = useState<IssuedApiKey | null>(null);
-  const [copied, setCopied] = useState(false);
+  const info = useApiKeyInfo();
+  const regenerate = useRegenerateApiKey();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  /** The plaintext key — shown once, dropped when the dialog closes. */
+  const [revealed, setRevealed] = useState<string | null>(null);
 
-  const rotate = useMutation({
-    mutationFn: rotateApiKey,
-    onSuccess: (key) => {
-      setIssued(key);
-      setConfirming(false);
-      setCopied(false);
-      queryClient.invalidateQueries({ queryKey: VERIFIER_PROFILE_KEY });
-    },
-  });
+  const hasKey = Boolean(info.data?.apiKeyPrefix);
 
-  async function copy() {
-    if (!issued) return;
-    await navigator.clipboard.writeText(issued.apiKey);
-    setCopied(true);
-  }
-
-  if (isLoading) return <p className="text-xs text-[#525A72]">Loading…</p>;
-  if (isError || !profile) {
-    return (
-      <p className="text-sm text-[#EF4444]">
-        Couldn&apos;t load your account. Try signing in again.
-      </p>
-    );
+  function issue(kind: "generate" | "rotate") {
+    regenerate.mutate(undefined, {
+      onSuccess: (issued) => {
+        setConfirmOpen(false);
+        setRevealed(issued.apiKey);
+        toast.success(
+          kind === "rotate"
+            ? "Key rotated. The old key no longer works."
+            : "Key created",
+        );
+      },
+      onError: (err) => {
+        setConfirmOpen(false);
+        toast.error(err.message);
+      },
+    });
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="bg-[#13161E] border border-[#1E2330] rounded-xl p-6">
-        <h2 className="text-sm font-semibold text-[#EEF0F6]">Active API key</h2>
-        <p className="text-xs text-[#8B92A8] mt-1">
-          Your website embeds this key so NexusID knows verification requests
-          come from {profile.displayName}.
-        </p>
-
-        <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-[#252C3D] bg-[#0C0E13] px-4 py-3">
-          <div>
-            <p
-              className="text-sm text-[#EEF0F6]"
-              style={{ fontFamily: "JetBrains Mono, monospace" }}
-            >
-              {profile.apiKeyPrefix
-                ? `${profile.apiKeyPrefix}••••••••••••••••`
-                : "No key yet"}
-            </p>
-            <p className="text-xs text-[#525A72] mt-1">
-              Generated {formatDateTime(profile.apiKeyRotatedAt)}
-            </p>
-          </div>
-          {!confirming && (
-            <button
-              onClick={() => setConfirming(true)}
-              className="shrink-0 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90"
-              style={{
-                background: "linear-gradient(135deg, #3B6FE8, #5B4FE8)",
-              }}
-            >
-              {profile.apiKeyPrefix ? "Rotate key" : "Generate key"}
-            </button>
-          )}
-        </div>
-
-        {confirming && (
-          <div className="mt-4 rounded-lg border border-[#4A3A15] bg-[rgba(245,158,11,0.06)] p-4">
-            <p className="text-sm text-[#F59E0B]">
-              The current key stops working immediately. Any page still using it
-              will fail to start verifications until you update it.
-            </p>
-            <div className="flex gap-3 mt-3">
-              <button
-                onClick={() => rotate.mutate()}
-                disabled={rotate.isPending}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                style={{
-                  background: "linear-gradient(135deg, #3B6FE8, #5B4FE8)",
-                }}
-              >
-                {rotate.isPending ? "Generating…" : "Generate new key"}
-              </button>
-              <button
-                onClick={() => setConfirming(false)}
-                className="px-4 py-2 rounded-lg text-sm text-[#8B92A8] border border-[#252C3D]"
-              >
-                Cancel
-              </button>
-            </div>
-            {rotate.isError && (
-              <p className="text-xs text-[#EF4444] mt-2">
-                {(rotate.error as Error).message}
-              </p>
-            )}
-          </div>
-        )}
-
-        {issued && (
-          <div className="mt-4 rounded-lg border border-[#16532F] bg-[rgba(34,197,94,0.06)] p-4">
-            <p className="text-sm text-[#22C55E] font-medium">
-              New key — copy it now, it won&apos;t be shown again
-            </p>
-            <div
-              className="mt-3 rounded-md border border-[#252C3D] bg-[#0A0C10] px-3 py-2 text-sm text-[#EEF0F6] break-all"
-              style={{ fontFamily: "JetBrains Mono, monospace" }}
-            >
-              {issued.apiKey}
-            </div>
-            <button
-              onClick={copy}
-              className="mt-3 text-xs text-[#3B6FE8] hover:text-[#4A7EF7]"
-            >
-              {copied ? "Copied" : "Copy key"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-[#EEF0F6]">
-          Use it on your server
+    <div className="space-y-6">
+      <div className="max-w-2xl space-y-1">
+        <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">
+          API keys
         </h2>
-        <VerifierIntegrationCode
-          apiKey={issued?.apiKey ?? "YOUR_API_KEY"}
-          fields={["degree_title", "university"]}
-        />
+        <p className="text-sm text-text-muted">
+          Your server uses this key to open verification sessions and read
+          outcomes. Keep it on the server, never in a web page or app.
+        </p>
       </div>
+
+      {info.isError ? (
+        <ErrorState
+          title="Couldn't load your key"
+          message={info.error.message}
+          onRetry={() => info.refetch()}
+          retrying={info.isFetching}
+        />
+      ) : !info.isPending && !hasKey ? (
+        <EmptyState
+          icon={KeyRound}
+          title="No API key yet"
+          description="Create a key to start opening verification sessions from your server."
+          action={{
+            label: regenerate.isPending ? "Creating…" : "Create key",
+            onClick: () => issue("generate"),
+          }}
+        />
+      ) : (
+        <Card className="overflow-hidden shadow-none">
+          <div className="flex h-14 items-center justify-between border-b border-border-subtle px-5">
+            <h3 className="font-display text-base font-semibold text-foreground">
+              Secret key
+            </h3>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+              disabled={info.isPending || regenerate.isPending}
+              className="gap-1.5"
+            >
+              <RotateCw
+                className="size-3.5"
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              Rotate key
+            </Button>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-5">Name</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="pr-5">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {info.isPending ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="pl-5">
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-36" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-28" />
+                  </TableCell>
+                  <TableCell className="pr-5">
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="pl-5 font-medium text-foreground">
+                    Live key
+                  </TableCell>
+                  <TableCell>
+                    <code
+                      className="font-mono text-xs text-foreground"
+                      aria-label={`Key starting ${info.data?.apiKeyPrefix}, rest hidden`}
+                    >
+                      {maskedKey(info.data?.apiKeyPrefix)}
+                    </code>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-text-muted">
+                    {formatDate(info.data?.apiKeyRotatedAt)}
+                  </TableCell>
+                  <TableCell className="pr-5">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+                      <ShieldCheck
+                        className="size-3.5"
+                        strokeWidth={1.75}
+                        aria-hidden="true"
+                      />
+                      ACTIVE
+                    </span>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+          <p className="border-t border-border-subtle px-5 py-3 text-xs text-text-muted">
+            NexusID stores only a hash of this key, so it can&apos;t be shown
+            again. Lost it? Rotate to get a new one.
+          </p>
+        </Card>
+      )}
+
+      <Card className="space-y-3 p-5 shadow-none">
+        <h3 className="font-display text-base font-semibold text-foreground">
+          Using the key
+        </h3>
+        <p className="text-sm text-text-muted">
+          Send it in the{" "}
+          <code className="font-mono text-xs text-foreground">x-api-key</code>{" "}
+          header from your server.
+        </p>
+        <CodeBlock
+          label="bash"
+          code={`curl -X POST ${API_BASE}/verification/sessions \\\n  -H "x-api-key: $NEXUSID_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"predicate":"AGE_OVER_18"}'`}
+          copiedMessage="Command copied"
+        />
+      </Card>
+
+      {/* Rotate confirmation (BR-009) */}
+      <AlertDialog
+        open={confirmOpen}
+        onOpenChange={(o) => !regenerate.isPending && setConfirmOpen(o)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rotate key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The current key ({maskedKey(info.data?.apiKeyPrefix)}) stops
+              working immediately. Any server still using it will get errors
+              until you deploy the new key.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={regenerate.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault(); // keep the dialog open until the request finishes
+                issue("rotate");
+              }}
+              disabled={regenerate.isPending}
+              className="bg-danger text-white hover:bg-danger/90"
+            >
+              {regenerate.isPending && (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              )}
+              {regenerate.isPending ? "Rotating…" : "Rotate key"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Show-once dialog (FR-040 AC1) */}
+      <Dialog
+        open={revealed !== null}
+        onOpenChange={(o) => !o && setRevealed(null)}
+      >
+        <DialogContent
+          className="sm:max-w-xl"
+          onInteractOutside={(e) => e.preventDefault()} // don't lose the key to a stray click
+        >
+          <DialogHeader>
+            <DialogTitle>Your new API key</DialogTitle>
+            <DialogDescription>
+              Copy it now and store it with your server&apos;s secrets.
+            </DialogDescription>
+          </DialogHeader>
+          {revealed && <ApiKeyReveal apiKey={revealed} />}
+          <DialogFooter>
+            <Button onClick={() => setRevealed(null)}>
+              I&apos;ve stored the key
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

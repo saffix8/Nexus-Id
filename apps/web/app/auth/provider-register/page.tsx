@@ -1,62 +1,84 @@
 "use client";
 
-// Service Provider registration (SRS UC-008, FR-033). On success the first
-// API key (FR-034) is shown exactly once — it is stored only as a hash.
+// SCR-017 — Service Provider registration (FR-039, BR-008). Posts to
+// /api/auth?action=verifier-register, which creates the account, signs the
+// provider in and returns the first API key. The key is shown here once
+// (FR-040 AC1) and never stored by the web app.
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { ArrowRight, CircleAlert, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ApiKeyReveal } from "@/components/nexus/ApiKeyReveal";
+import { AuthField, AuthFrame } from "@/components/nexus/AuthFrame";
+import { parseForm } from "@/lib/forms";
 
-const providerSchema = z.object({
-  displayName: z.string().min(1, "Organisation name is required"),
+const schema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(1, "Platform name is required")
+    .max(120, "Keep it under 120 characters"),
   domain: z
     .string()
-    .min(1, "Domain is required")
-    .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, "Enter a domain like example.com"),
+    .trim()
+    .min(1, "Website domain is required")
+    .transform((d) =>
+      d
+        .replace(/^https?:\/\//i, "")
+        .replace(/\/.*$/, "")
+        .toLowerCase(),
+    )
+    .pipe(
+      z
+        .string()
+        .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/, "Enter a domain like shop-a.com"),
+    ),
   email: z
     .string()
+    .trim()
     .min(1, "Email is required")
     .email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: z.string().min(8, "Use at least 8 characters"),
 });
-
-type ProviderForm = z.infer<typeof providerSchema>;
+type Form = z.input<typeof schema>;
 
 const FIELDS: {
-  name: keyof ProviderForm;
+  name: keyof Form;
   label: string;
   type: string;
-  placeholder: string;
+  placeholder?: string;
   autoComplete: string;
 }[] = [
   {
     name: "displayName",
-    label: "Organisation name",
+    label: "Platform name",
     type: "text",
-    placeholder: "Acme Hiring",
+    placeholder: "Shop A",
     autoComplete: "organization",
   },
   {
     name: "domain",
     label: "Website domain",
     type: "text",
-    placeholder: "acme.com",
+    placeholder: "shop-a.com",
     autoComplete: "url",
   },
   {
     name: "email",
     label: "Work email",
     type: "email",
-    placeholder: "you@acme.com",
+    placeholder: "you@shop-a.com",
     autoComplete: "email",
   },
   {
     name: "password",
     label: "Password",
     type: "password",
-    placeholder: "••••••••",
     autoComplete: "new-password",
   },
 ];
@@ -65,169 +87,132 @@ export default function ProviderRegisterPage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
   const {
     register,
     handleSubmit,
     setError,
     formState: { errors, isSubmitting },
-  } = useForm<ProviderForm>();
+  } = useForm<Form>();
 
-  const onSubmit = async (data: ProviderForm) => {
+  async function onSubmit(raw: Form) {
     setServerError(null);
-
-    const parsed = providerSchema.safeParse(data);
-    if (!parsed.success) {
-      parsed.error.issues.forEach((issue) => {
-        setError(issue.path[0] as keyof ProviderForm, {
-          message: issue.message,
-        });
-      });
-      return;
-    }
-
+    const data = parseForm(schema, raw, setError);
+    if (!data) return;
     try {
       const res = await fetch("/api/auth?action=verifier-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed.data),
+        body: JSON.stringify(data),
       });
       const json = (await res.json()) as {
         success: boolean;
         apiKey?: string;
         error?: string;
       };
-
       if (!res.ok || !json.success || !json.apiKey) {
-        setServerError(json.error ?? "Registration failed");
+        const message = json.error ?? "Registration failed";
+        // FR-039 AC2: say which field is taken, inline.
+        if (/email/i.test(message) && res.status === 409)
+          setError("email", { message });
+        else if (/domain/i.test(message) && res.status === 409)
+          setError("domain", { message });
+        else setServerError(message);
         return;
       }
       setApiKey(json.apiKey);
     } catch {
-      setServerError("Unable to reach the server. Please try again.");
+      setServerError(
+        "Can't reach the NexusID server. Check that the backend is running.",
+      );
     }
-  };
+  }
 
-  async function copyKey() {
-    if (!apiKey) return;
-    await navigator.clipboard.writeText(apiKey);
-    setCopied(true);
+  if (apiKey) {
+    return (
+      <AuthFrame
+        title="Your platform is ready"
+        description="Here is your first API key. Copy it now."
+      >
+        <div className="grid gap-5">
+          <ApiKeyReveal apiKey={apiKey} />
+          <Button
+            className="w-full"
+            onClick={() => {
+              setApiKey(null);
+              router.push("/verifier/requirements");
+              router.refresh();
+            }}
+          >
+            I&apos;ve stored it, choose what to verify
+            <ArrowRight
+              className="size-4"
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+          </Button>
+        </div>
+      </AuthFrame>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[#0C0E13] flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
-        <div className="bg-[#13161E] border border-[#1E2330] rounded-xl p-8 shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
-          {apiKey ? (
-            <>
-              <h1 className="font-display font-semibold text-2xl text-[#EEF0F6] tracking-tight mb-1">
-                Your API key
-              </h1>
-              <p className="text-sm text-[#8B92A8] mb-6">
-                Copy it now and keep it on your server. It won&apos;t be shown
-                again — you can generate a new one from API Keys at any time.
-              </p>
-              <div
-                className="rounded-md border border-[#252C3D] bg-[#0A0C10] px-3 py-3 text-sm text-[#EEF0F6] break-all"
-                style={{ fontFamily: "JetBrains Mono, monospace" }}
-              >
-                {apiKey}
-              </div>
-              <div className="flex gap-3 mt-4">
-                <button
-                  type="button"
-                  onClick={copyKey}
-                  className="flex-1 h-10 rounded-md border border-[#252C3D] text-sm text-[#EEF0F6] hover:bg-[#1A1E28] transition-colors"
-                >
-                  {copied ? "Copied" : "Copy key"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    router.push("/verifier/dashboard");
-                    router.refresh();
-                  }}
-                  className="flex-1 h-10 rounded-md bg-gradient-to-r from-[#3B6FE8] to-[#5B4FE8] text-white text-sm font-medium hover:opacity-90"
-                >
-                  Continue to portal
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <h1 className="font-display font-semibold text-2xl text-[#EEF0F6] tracking-tight mb-1">
-                Register your organisation
-              </h1>
-              <p className="text-sm text-[#8B92A8] mb-8">
-                Verify your users&apos; claims without collecting their
-                documents.
-              </p>
-
-              {serverError && (
-                <div className="mb-6 px-4 py-3 rounded-lg bg-[#250F0F] border border-[#4A1515] text-sm text-[#EF4444]">
-                  {serverError}
-                </div>
-              )}
-
-              <form
-                method="post"
-                onSubmit={handleSubmit(onSubmit)}
-                noValidate
-                className="space-y-5"
-              >
-                {FIELDS.map((f) => (
-                  <div key={f.name} className="flex flex-col gap-1.5">
-                    <label
-                      htmlFor={f.name}
-                      className="text-sm font-medium text-[#8B92A8] tracking-wide"
-                    >
-                      {f.label}
-                    </label>
-                    <input
-                      id={f.name}
-                      type={f.type}
-                      placeholder={f.placeholder}
-                      autoComplete={f.autoComplete}
-                      className={`bg-[#0A0C10] border rounded-md px-3 py-2.5 text-base text-[#EEF0F6] placeholder:text-[#525A72] outline-none transition-all ${
-                        errors[f.name]
-                          ? "border-[#EF4444]"
-                          : "border-[#252C3D] focus:border-[#3B6FE8]"
-                      }`}
-                      {...register(f.name)}
-                    />
-                    {errors[f.name] && (
-                      <p className="text-xs text-[#EF4444]">
-                        {errors[f.name]?.message}
-                      </p>
-                    )}
-                  </div>
-                ))}
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full h-11 mt-2 rounded-md bg-gradient-to-r from-[#3B6FE8] to-[#5B4FE8] text-white font-medium text-base hover:opacity-90 disabled:opacity-50"
-                >
-                  {isSubmitting
-                    ? "Creating account…"
-                    : "Create provider account"}
-                </button>
-              </form>
-
-              <p className="mt-6 text-center text-sm text-[#8B92A8]">
-                Already registered?{" "}
-                <Link
-                  href="/auth/login?role=provider"
-                  className="text-[#3B6FE8] hover:text-[#4A7EF7] font-medium"
-                >
-                  Sign in
-                </Link>
-              </p>
-            </>
+    <AuthFrame
+      title="Register your platform"
+      description="Verify conditions like age or enrollment without collecting personal data."
+      footer={
+        <>
+          Already registered?{" "}
+          <Link
+            href="/auth/provider-login"
+            className="font-medium text-accent-text hover:underline"
+          >
+            Sign in
+          </Link>
+        </>
+      }
+    >
+      <form
+        method="post"
+        onSubmit={handleSubmit(onSubmit)}
+        noValidate
+        className="grid gap-5"
+      >
+        {serverError && (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2.5 text-sm text-danger"
+          >
+            <CircleAlert
+              className="mt-0.5 size-4 shrink-0"
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+            {serverError}
+          </p>
+        )}
+        {FIELDS.map((f) => {
+          const err = errors[f.name]?.message;
+          return (
+            <AuthField key={f.name} id={f.name} label={f.label} error={err}>
+              <Input
+                id={f.name}
+                type={f.type}
+                autoComplete={f.autoComplete}
+                placeholder={f.placeholder}
+                aria-invalid={!!err}
+                aria-describedby={err ? `${f.name}-error` : undefined}
+                {...register(f.name)}
+              />
+            </AuthField>
+          );
+        })}
+        <Button type="submit" className="w-full" disabled={isSubmitting}>
+          {isSubmitting && (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
           )}
-        </div>
-      </div>
-    </div>
+          {isSubmitting ? "Creating account…" : "Create account"}
+        </Button>
+      </form>
+    </AuthFrame>
   );
 }

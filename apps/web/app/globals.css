@@ -43,9 +43,6 @@
     --sidebar-border: 223 24% 19%;
     --sidebar-ring: 222 79% 57%;
 
-    /* Legacy v1 variable still read by components/legacy-ui/StatCard.tsx */
-    --color-bg-overlay: #1a1e28;
-
     color-scheme: dark;
   }
 

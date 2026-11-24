@@ -36,7 +36,6 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-hook-form": "^7.92.0",
-    "react-hot-toast": "^2.4.1",
     "recharts": "^2.15.4",
     "sonner": "^2.0.8",
     "tailwind-merge": "^2.6.2",

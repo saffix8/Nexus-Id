@@ -8,6 +8,7 @@ const AUTH_COOKIE = "nexusid_token"; // End User session
 const VERIFIER_COOKIE = "nexusid_verifier_token"; // Service Provider session (FR-033)
 const VERIFIER_ROLE = "verifier";
 const LOGIN_PATH = "/auth/login";
+const PROVIDER_LOGIN_PATH = "/auth/provider-login"; // SCR-017
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET ?? "fallback-dev-secret-change-in-production",
@@ -17,6 +18,7 @@ const AUTH_ONLY_PATHS = [
   "/auth/login",
   "/auth/register",
   "/auth/provider-register",
+  "/auth/provider-login",
 ];
 
 // ─── Token validation ─────────────────────────────────────────────────────────
@@ -39,9 +41,11 @@ async function hasValidSession(
 }
 
 function redirectToLogin(request: NextRequest, role: Role): NextResponse {
-  const loginUrl = new URL(LOGIN_PATH, request.url);
+  const loginUrl = new URL(
+    role === "verifier" ? PROVIDER_LOGIN_PATH : LOGIN_PATH,
+    request.url,
+  );
   loginUrl.searchParams.set("next", request.nextUrl.pathname); // preserve destination
-  if (role === "verifier") loginUrl.searchParams.set("role", "provider");
   return NextResponse.redirect(loginUrl);
 }
 
@@ -68,20 +72,33 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return ok ? NextResponse.next() : redirectToLogin(request, "user");
   }
 
+  // Old combined login link for providers → the SP sign-in page.
+  if (pathname === LOGIN_PATH && searchParams.get("role") === "provider") {
+    const url = new URL(PROVIDER_LOGIN_PATH, request.url);
+    const next = searchParams.get("next");
+    if (next) url.searchParams.set("next", next);
+    return NextResponse.redirect(url);
+  }
+
   // Already signed in for the chosen role → skip the login/register page.
   if (AUTH_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
     const role: Role =
       searchParams.get("role") === "provider" ||
-      pathname.startsWith("/auth/provider-register")
+      pathname.startsWith("/auth/provider-")
         ? "verifier"
         : "user";
     const cookie = role === "verifier" ? VERIFIER_COOKIE : AUTH_COOKIE;
     if (await hasValidSession(request.cookies.get(cookie)?.value, role)) {
       const fallback =
         role === "verifier" ? "/verifier/dashboard" : "/dashboard";
-      return NextResponse.redirect(
-        new URL(searchParams.get("next") ?? fallback, request.url),
-      );
+      // Same-portal paths only (no "//host" or other-portal open redirects).
+      const next = searchParams.get("next");
+      const portal = role === "verifier" ? "/verifier" : "/dashboard";
+      const safe =
+        next && next.startsWith(portal) && !next.startsWith("//")
+          ? next
+          : fallback;
+      return NextResponse.redirect(new URL(safe, request.url));
     }
   }
 
@@ -99,5 +116,6 @@ export const config = {
     "/auth/login",
     "/auth/register",
     "/auth/provider-register",
+    "/auth/provider-login",
   ],
 };

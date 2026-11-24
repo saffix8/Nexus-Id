@@ -1,88 +1,74 @@
 "use client";
 
-// Integration guide for Service Providers (SRS FR-043, FR-032, FR-045):
-// open a session server-side (API-030), embed the session in the page, react
-// to the in-page result event, and confirm the outcome server-side (API-031).
+// Integration guide (FR-042 AC3, FR-043, FR-032, FR-045): open a session on the
+// server (API-030), put the tag on the page, read the outcome on the server (API-031).
 
 import Link from "next/link";
-import { VerifierIntegrationCode } from "@/components/VerifierIntegrationCode";
+import { isPredicateCode } from "@nexusid/types";
+import { Card } from "@/components/ui/card";
+import { CodeBlock, PredicateChip } from "@/components/nexus";
+import { PAGE_SNIPPET, outcomeSnippet, sessionSnippet } from "@/components/VerifierIntegrationCode";
+import { useRequirements } from "@/lib/verifierApi";
 
-const EVENT_SNIPPET = `document.addEventListener('nexusid:result', (e) => {
-  // e.detail.status: 'completed' | 'rejected' | 'expired' | 'error'
-  // e.detail.requestId: the session ID — confirm it on your server (step 3)
-  // e.detail.verifiedFields: only the fields you asked for (on 'completed')
-  console.log('NexusID:', e.detail);
+const EVENT_SNIPPET = `// Optional: react in the page as soon as the extension sees the result.
+// Always confirm on your server (step 3) before unlocking anything.
+document.addEventListener("nexusid:result", (e) => {
+  console.log("NexusID session", e.detail.requestId, e.detail.status);
 });`;
 
-const SERVER_SNIPPET = `GET /api/v1/verification/sessions/{sessionId}/outcome
-x-api-key: YOUR_API_KEY
-
-→ { "status": "completed", "verifiedFields": { "degree_title": "..." } }
-→ { "status": "rejected" }   // user declined
-→ { "status": "expired" }    // no answer within the validity window`;
-
-function Code({ children }: { children: string }) {
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
-    <pre
-      className="rounded-lg border border-[#252C3D] bg-[#0A0C10] p-4 text-xs text-[#EEF0F6] overflow-x-auto"
-      style={{ fontFamily: "JetBrains Mono, monospace" }}
-    >
+    <Card className="space-y-3 p-5 shadow-none">
+      <h3 className="flex items-center gap-3 font-display text-base font-semibold text-foreground">
+        <span className="flex size-6 items-center justify-center rounded-full bg-overlay text-xs tabular-nums text-text-muted">
+          {n}
+        </span>
+        {title}
+      </h3>
       {children}
-    </pre>
+    </Card>
   );
 }
 
 export default function IntegrationPage() {
+  const { data } = useRequirements();
+  const configured = (data?.predicates ?? []).filter(isPredicateCode);
+  const predicate = configured[0] ?? "AGE_OVER_18";
+
   return (
-    <div className="max-w-3xl space-y-8">
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-[#EEF0F6]">
-          1. Open a session on your server, embed it in the page
-        </h2>
-        <p className="text-xs text-[#8B92A8]">
-          For each page view, your server opens a session with your API key.
-          NexusID returns a session ID and a single-use nonce, valid for 120
-          seconds. Put only those two in the page. The NexusID browser
-          extension detects them and relays the request to the user&apos;s
-          paired device; your key never reaches the browser. Get your key
-          from{" "}
-          <Link
-            href="/verifier/api-keys"
-            className="text-[#3B6FE8] hover:text-[#4A7EF7]"
-          >
-            API Keys
-          </Link>
-          .
+    <div className="max-w-3xl space-y-6">
+      <div className="space-y-1">
+        <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">Integrate NexusID</h2>
+        <p className="text-sm text-text-muted">
+          Three steps. Your server never receives personal data, only whether the condition was met.
         </p>
-        <VerifierIntegrationCode
-          apiKey="YOUR_API_KEY"
-          fields={["degree_title", "university"]}
-        />
-      </section>
+      </div>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-[#EEF0F6]">
-          2. React to the outcome on the page
-        </h2>
-        <p className="text-xs text-[#8B92A8]">
-          The extension fires a{" "}
-          <code className="text-[#EEF0F6]">nexusid:result</code> event on the
-          element — including when the user declines or the request times out.
+      <Step n={1} title="Open a session on your server">
+        <p className="text-sm text-text-muted">
+          One session per check, for one condition you&apos;ve configured
+          {configured.length > 0 ? (
+            <>
+              {" "}(<span className="inline-flex flex-wrap gap-1.5 align-middle">{configured.map((c) => <PredicateChip key={c} code={c} />)}</span>)
+            </>
+          ) : (
+            <> on the <Link href="/verifier/requirements" className="text-accent-text hover:underline">Requirements</Link> page</>
+          )}
+          . Your API key is on the <Link href="/verifier/api-keys" className="text-accent-text hover:underline">API keys</Link> page.
         </p>
-        <Code>{EVENT_SNIPPET}</Code>
-      </section>
+        <CodeBlock label="Node.js" code={sessionSnippet(predicate)} copiedMessage="Code copied" />
+      </Step>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-[#EEF0F6]">
-          3. Confirm on your server
-        </h2>
-        <p className="text-xs text-[#8B92A8]">
-          Page events can be forged by the page&apos;s visitor, so confirm the
-          result from your backend with your API key before granting access.
-          Only your key can read your requests.
-        </p>
-        <Code>{SERVER_SNIPPET}</Code>
-      </section>
+      <Step n={2} title="Put the session on your page">
+        <p className="text-sm text-text-muted">The extension detects the tag and asks the user&apos;s phone. The nonce is single use.</p>
+        <CodeBlock label="HTML" code={PAGE_SNIPPET} copiedMessage="Code copied" />
+        <CodeBlock label="JavaScript (optional)" code={EVENT_SNIPPET} copiedMessage="Code copied" />
+      </Step>
+
+      <Step n={3} title="Read the outcome on your server">
+        <p className="text-sm text-text-muted">Poll every 2 s until it isn&apos;t PENDING. Sessions expire after 120 s.</p>
+        <CodeBlock label="Node.js" code={outcomeSnippet()} copiedMessage="Code copied" />
+      </Step>
     </div>
   );
 }

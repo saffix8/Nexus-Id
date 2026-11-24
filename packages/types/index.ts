@@ -220,3 +220,66 @@ export interface AuthTokenResponse {
   token: string;
   expires_at: string;
 }
+
+// ── PREDICATE + CATEGORY DISPLAY (DESIGN.md §3.1, §3.6, §5.6) ─
+// Shared by web, mobile and extension so every surface shows the same label,
+// colour and icon for a predicate. Codes and categories match the catalog in
+// packages/sd-jwt/src/predicates.ts (FR-005, BR-021) — CGPA is issued by Air
+// University, so it sits under enrollment.
+
+export type PredicateCode =
+  | 'AGE_OVER_18'
+  | 'AGE_OVER_21'
+  | 'NATIONALITY_PAKISTANI'
+  | 'DEGREE_BACHELOR_OR_HIGHER'
+  | 'CGPA_AT_LEAST_2_0'
+  | 'CGPA_AT_LEAST_3_0'
+  | 'CGPA_AT_LEAST_3_5'
+  | 'ENROLLED_CURRENT'
+  | 'EMPLOYMENT_ACTIVE';
+
+export interface PredicateDisplay {
+  code: PredicateCode;
+  /** Human label (Inter). The code is shown underneath in mono. */
+  label: string;
+  category: CredentialType;
+}
+
+export const PREDICATE_DISPLAY: Readonly<Record<PredicateCode, PredicateDisplay>> = {
+  AGE_OVER_18: { code: 'AGE_OVER_18', label: 'Age over 18', category: 'identity' },
+  AGE_OVER_21: { code: 'AGE_OVER_21', label: 'Age over 21', category: 'identity' },
+  NATIONALITY_PAKISTANI: { code: 'NATIONALITY_PAKISTANI', label: 'Pakistani national', category: 'identity' },
+  DEGREE_BACHELOR_OR_HIGHER: { code: 'DEGREE_BACHELOR_OR_HIGHER', label: "Bachelor's degree or higher", category: 'education' },
+  CGPA_AT_LEAST_2_0: { code: 'CGPA_AT_LEAST_2_0', label: 'CGPA ≥ 2.0', category: 'enrollment' },
+  CGPA_AT_LEAST_3_0: { code: 'CGPA_AT_LEAST_3_0', label: 'CGPA ≥ 3.0', category: 'enrollment' },
+  CGPA_AT_LEAST_3_5: { code: 'CGPA_AT_LEAST_3_5', label: 'CGPA ≥ 3.5', category: 'enrollment' },
+  ENROLLED_CURRENT: { code: 'ENROLLED_CURRENT', label: 'Currently enrolled', category: 'enrollment' },
+  EMPLOYMENT_ACTIVE: { code: 'EMPLOYMENT_ACTIVE', label: 'Currently employed', category: 'employment' },
+};
+
+export const PREDICATE_CODES = Object.keys(PREDICATE_DISPLAY) as PredicateCode[];
+
+export function isPredicateCode(value: string): value is PredicateCode {
+  return Object.prototype.hasOwnProperty.call(PREDICATE_DISPLAY, value);
+}
+
+/** Label for a code; unknown codes fall back to the raw code. */
+export function predicateLabel(code: string): string {
+  return isPredicateCode(code) ? PREDICATE_DISPLAY[code].label : code;
+}
+
+export interface CategoryDisplay {
+  label: string;
+  issuerName: string;
+  /** Hex colour token `cat-*` (DESIGN.md §3.1). */
+  color: string;
+  /** lucide icon name — resolve with lucide-react / lucide-react-native. */
+  icon: 'IdCard' | 'GraduationCap' | 'BriefcaseBusiness' | 'School';
+}
+
+export const CATEGORY_DISPLAY: Readonly<Record<CredentialType, CategoryDisplay>> = {
+  identity: { label: 'National Identity', issuerName: 'NADRA Pakistan', color: '#3B82F6', icon: 'IdCard' },
+  education: { label: 'Education', issuerName: 'Higher Education Commission', color: '#8B5CF6', icon: 'GraduationCap' },
+  employment: { label: 'Employment', issuerName: 'LinkedIn', color: '#0EA5E9', icon: 'BriefcaseBusiness' },
+  enrollment: { label: 'Enrollment', issuerName: 'Air University', color: '#10B981', icon: 'School' },
+};

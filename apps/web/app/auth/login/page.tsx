@@ -123,7 +123,7 @@ export default function LoginPage({
                 type="button"
                 role="tab"
                 aria-selected={role === r}
-                onClick={() => { setRole(r); setServerError(null); }}
+                onClick={() => { if (r === 'provider') { router.push('/auth/provider-login'); return; } setRole(r); setServerError(null); }}
                 className={`py-2 rounded-md text-sm font-medium transition-colors ${
                   role === r ? 'bg-[#1A1E28] text-[#EEF0F6]' : 'text-[#525A72] hover:text-[#8B92A8]'
                 }`}

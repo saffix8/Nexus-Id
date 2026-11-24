@@ -103,7 +103,43 @@ router.get(
   },
 );
 
-// POST /verifiers/me/api-key — UC-009: generate / rotate (BR-009).
+// GET /verifiers/api-key — API-043 (FR-040): key data only (prefix, rotation
+// time). The key itself is stored as a hash and can never be shown again.
+router.get(
+  "/api-key",
+  requireVerifierJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const p = await verifierAccountService.getProfile(req.user!.sub);
+      res.status(200).json(
+        success({
+          apiKeyPrefix: p.apiKeyPrefix,
+          apiKeyRotatedAt: p.apiKeyRotatedAt,
+          createdAt: p.createdAt,
+        }),
+      );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /verifiers/api-key/regenerate — API-044 (FR-040, ALG-009, BR-009).
+router.post(
+  "/api-key/regenerate",
+  requireVerifierJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      res
+        .status(200)
+        .json(success(await verifierAccountService.rotateApiKey(req.user!.sub)));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /verifiers/me/api-key — legacy alias of API-044.
 router.post(
   "/me/api-key",
   requireVerifierJWT,

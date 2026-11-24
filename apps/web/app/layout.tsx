@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, DM_Sans, JetBrains_Mono } from 'next/font/google';
 import { Providers } from './providers';
+import { Toaster } from '@/components/ui/sonner';
 import './globals.css';
 
 // ── Font loading (server-side, no 'use client') ──────────────────────────────
@@ -77,8 +78,9 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}
     >
-      <body className="bg-bg-base text-text-primary antialiased">
+      <body className="bg-background text-foreground antialiased">
         <Providers>{children}</Providers>
+        <Toaster />
       </body>
     </html>
   );

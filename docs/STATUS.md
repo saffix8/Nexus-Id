@@ -1,3 +1,77 @@
+# NexusID — Phase 3: Service Provider portal (2026-11-24)
+
+Backend Jest **100/100** (2 new tests). `tsc --noEmit` clean (backend, web). `next build` passes. Every screen checked
+in headless Chrome against `next dev` + live backend, as Shop A and as a throwaway provider: loading, empty, error
+(mocked 503), 8 s timeout, success, 390 px width (16 px gutter, no horizontal scroll). No console errors apart from
+the known `/favicon.ico` 404.
+
+## Backend
+- **API-043** `GET /verifiers/api-key` (prefix + rotation time, never the key) and **API-044**
+  `POST /verifiers/api-key/regenerate` (ALG-009) at the SRS paths. `POST /verifiers/me/api-key` kept as an alias.
+- **API-047/048** (`/analytics/verifications`, `/analytics/recent`) now accept the portal JWT **or** `x-api-key`
+  (`requireVerifierAuth`). If an `x-api-key` header is sent and it's wrong, the request gets 401. It is never retried as a token.
+  - API-047: `{ total, verified, failed, declined, expired, pending, successRate, daily[7] }`. Overdue pending sessions count as
+    expired. `?tzOffset=` buckets days in the viewer's timezone.
+  - API-048: `{ sessionId, createdAt, predicate, predicateLabel, outcome, issuer, proofHash, decidedAt }`, `?limit=` ≤ 100.
+    No user fields (FR-042 AC2, tested by exact key list).
+
+## Web
+- **SCR-012** `/login`: two role cards → `/auth/login` (End User, unchanged until Phase 7) or `/auth/provider-login`.
+- **SCR-017** `/auth/provider-login` + `/auth/provider-register` (login-03 `AuthFrame`). Register: platform name, domain,
+  email, password. Inline field errors, a taken email/domain shown on the field (FR-039 AC2), first key shown once, then → Requirements.
+  `/auth/login?role=provider` and unauthenticated `/verifier/*` redirect to the SP login.
+- **SCR-018** `/verifier/dashboard`: KPI row, stacked 7-day chart, `LiveLogTable`, "Integrate in 2 minutes" snippet,
+  configured-conditions card, and a warning banner when nothing is configured. Stats and log poll every **3 s**. A session created
+  with Shop A's key appeared in the log in under 3 s.
+- **SCR-019** `/verifier/requirements`: 4 category cards with colour strips, the 9 catalog predicates, sticky footer with
+  a live chip preview, Save/Discard (API-046).
+- **SCR-020** `/verifier/api-keys`: masked key row, Rotate → AlertDialog (BR-009 wording) → show-once dialog with Copy;
+  "Create key" empty state if a provider has no key.
+- `/verifier/integration` rewritten for `{ predicate }` / `outcome` (it still said `requestedFields` / `verifiedFields`).
+  `/verifier/create` and `/verifier/analytics` now redirect (Requirements / Dashboard).
+- `lib/verifierApi.ts`: typed hooks; 8 s request timeout, not retried; 401 → "Your session has ended".
+- New in `components/nexus/`: `ApiKeyReveal`, `ErrorState`, `AuthFrame`. `StatCard` gained `hint`.
+- Fixes found in the browser: duplicate nested `<main>` in `AppShell` (SidebarInset is already `<main>`). `LiveLogTable`
+  showed "in 2 seconds" for rows newer than its 10 s clock tick (now "just now"). Recharts re-animated on every poll.
+  Middleware open redirect on `?next=//host` for already-signed-in users.
+
+## Dev DB side effects of the check
+- One extra Shop A session (AGE_OVER_18, now EXPIRED) in Shop A's log.
+- One provider "UI Test Provider" (`ui-test-…@example.com`) with a rotated key and requirements AGE_OVER_21 + ENROLLED_CURRENT.
+- Shop A's key (`nxk_shop_a_demo_key_2026`) and requirements were **not** changed.
+
+## Not done / later
+- One key per provider (schema has a single `api_key`), so no key names or "last used".
+- Seeded 7-day history for the chart (DESIGN §10) → Phase 8.
+
+---
+
+# NexusID — Phase 2b: shared components (2026-11-24)
+
+`npx tsc --noEmit` and `next build` pass. `/dev/components` renders every component in every state with no console
+errors or hydration warnings (headless Chrome against `next dev`; only a missing `/favicon.ico` 404 — Phase 8 polish).
+
+- `packages/types`: `PredicateCode`, `PREDICATE_DISPLAY` (§5.6 labels + category), `PREDICATE_CODES`, `isPredicateCode`,
+  `predicateLabel`, `CATEGORY_DISPLAY` (label, issuer, hex, lucide icon name). Categories follow the sd-jwt catalog, so the
+  CGPA predicates are **enrollment** (AU issues them), not education. Rebuild `dist/` after editing (`npm run build -w packages/types`).
+- `apps/web/components/nexus/` (barrel `index.ts`): `OutcomeBadge` (all 10 §3.2 states + pending dot), `PredicateChip`,
+  `CodeBlock` (copy → check 2 s + sonner toast), `QRPanel` (120 s ring, warning ≤30 s, danger ≤10 s, aria-live at 30/10 s,
+  blurred expired state + New code, loading), `CredentialCard` (§5.1, valid/expired/revoked), `StatCard` + `EmptyState`
+  on shadcn Card, `LiveLogTable` shell (loading/empty/error/rows, new rows slide + flash, session copy, BR-015 tooltip),
+  `AppShell` (sidebar-07 style, collapsible to icons, user menu with area switch + sign out, 56 px top bar).
+- `AppShell` now wraps `/dashboard` and `/verifier` (replaces `DashboardChrome.tsx` and the hand-made verifier chrome).
+  Dropped the dead `/dashboard/settings` link.
+- Root layout renders sonner `<Toaster>` (tokens: card bg, border, radius 8, dialog shadow, status-coloured icon).
+  `TooltipProvider` added to `providers.tsx`. `react-hot-toast` removed (nothing used it any more).
+- Hydration: times only computed client-side (`hooks/use-now.ts`, tooltip content); expiry formatted from the ISO string;
+  QR countdown starts in `useEffect`. Fixed shadcn `SidebarMenuSkeleton`'s `Math.random()` width (now derived from `useId`).
+- `components/legacy-ui/` deleted; old unused `components/CredentialCard.tsx` replaced; `VerifierIntegrationCode` uses the new `CodeBlock`.
+- `next.config.js`: `distDir` honours `NEXT_DIST_DIR` so `NEXT_DIST_DIR=.next-build npx next build` can run next to a live
+  `next dev` (`.next-build/` gitignored).
+- Not done: `styles/tokens.css` is unused (and has a font `@import`); `@headlessui/react` still used by existing pages.
+
+---
+
 # NexusID — Phase 2a: shadcn/ui install (2026-11-24)
 
 `apps/web` now has shadcn/ui (new-york, neutral, CSS variables) on Tailwind 3.4.19 / Next 14.2.35 / React 18.3.1 (none upgraded).

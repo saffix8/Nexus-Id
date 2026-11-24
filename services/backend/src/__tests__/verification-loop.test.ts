@@ -407,6 +407,40 @@ describe("1 — Happy path: session → relay → push/pending → proof → VER
         predicate: "AGE_OVER_18",
       }),
     );
+
+    // API-048 (SP dashboard log): session ID, condition, outcome, proof hash — no user.
+    const recent = await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("Authorization", `Bearer ${shopPortalToken}`)
+      .expect(200);
+    const row = recent.body.data.find(
+      (r: { sessionId: string }) => r.sessionId === sessionId,
+    );
+    expect(row).toMatchObject({
+      outcome: "VERIFIED",
+      predicate: "AGE_OVER_18",
+      predicateLabel: "Age over 18",
+    });
+    expect(row.proofHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(Object.keys(row).sort()).toEqual([
+      "createdAt",
+      "decidedAt",
+      "id",
+      "issuer",
+      "outcome",
+      "predicate",
+      "predicateLabel",
+      "proofHash",
+      "sessionId",
+    ]);
+
+    // API-047 totals, with the API key this time.
+    const stats = await request(app)
+      .get("/api/v1/analytics/verifications")
+      .set("x-api-key", SHOP_API_KEY)
+      .expect(200);
+    expect(stats.body.data.verified).toBeGreaterThanOrEqual(1);
+    expect(stats.body.data.daily.at(-1).verified).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -483,7 +517,11 @@ describe("API-037 — no matching credential", () => {
     const otherId = randomUUID();
     await request(app)
       .post("/api/v1/users/register")
-      .send({ user_id: otherId, public_key: otherKeys.publicKey, push_token: "other-fcm-token" })
+      .send({
+        user_id: otherId,
+        public_key: otherKeys.publicKey,
+        push_token: "other-fcm-token",
+      })
       .expect(201);
     const ch = "other-" + Date.now();
     const login = await request(app)

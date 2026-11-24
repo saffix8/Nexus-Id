@@ -133,8 +133,19 @@ const config: Config = {
         "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         shimmer: "shimmer 1.5s infinite",
         reveal: "reveal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+        // DESIGN.md §3.5 — new live row: slide in + 1.5 s accent/10 flash
+        "row-in": "rowIn 200ms ease-out",
+        "row-flash": "rowFlash 1.5s ease-out",
       },
       keyframes: {
+        rowIn: {
+          from: { opacity: "0", transform: "translateY(-6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        rowFlash: {
+          from: { backgroundColor: "rgba(59,111,232,0.10)" },
+          to: { backgroundColor: "transparent" },
+        },
         fadeIn: {
           from: {
             opacity: "0",

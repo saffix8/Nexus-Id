@@ -1,79 +1,71 @@
 // apps/web/components/VerifierIntegrationCode.tsx
 "use client";
 
-// SRS verification flow from the Service Provider's side:
-//   1. Server opens a session with the API key (API-030, FR-043).
-//   2. Page carries only the session ID and single-use nonce, which the
-//      NexusID extension relays with its pairing token (API-032, FR-032).
+// The Service Provider integration (FR-042 AC3, FR-043, FR-032, FR-045):
+//   1. Server opens a session for one catalog predicate with the API key (API-030).
+//   2. The page carries only the session ID and single-use nonce; the NexusID
+//      extension detects it and relays it with its pairing token (API-032).
+//   3. Server reads the outcome with the API key (API-031). Outcome only, no data.
 // The API key stays on the provider's server; it never goes in a page.
 
-import { useState } from "react";
-import { Button } from "@/components/legacy-ui/Button";
+import { CodeBlock } from "@/components/nexus/CodeBlock";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+
+export type SnippetStep = "session" | "page" | "outcome";
 
 interface VerifierIntegrationCodeProps {
-  /** Service Provider API key (FR-034) — used server-side only. */
-  apiKey: string;
-  fields: string[];
-  callbackUrl?: string;
+  /** A configured catalog predicate code, e.g. AGE_OVER_18. */
+  predicate: string;
+  /** Placeholder or env var shown where the key goes (never a real key). */
+  apiKeyRef?: string;
+  steps?: SnippetStep[];
+  className?: string;
 }
 
-function CodeBlock({ label, code }: { label: string; code: string }) {
-  const [copied, setCopied] = useState(false);
+export function sessionSnippet(predicate: string, apiKeyRef = "process.env.NEXUSID_API_KEY") {
+  return `// Server, once per checkout (API-030). Never in the browser.
+const res = await fetch("${API_BASE}/verification/sessions", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-api-key": ${apiKeyRef},
+  },
+  body: JSON.stringify({ predicate: "${predicate}" }),
+});
+const { data } = await res.json(); // { sessionId, nonce, expiresAt } — valid 120 s`;
+}
 
-  const copy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+export const PAGE_SNIPPET = `<!-- Page: the NexusID extension picks this up (FR-032) -->
+<div id="nexusid-verify"
+     data-session-id="{{ sessionId }}"
+     data-nonce="{{ nonce }}"></div>`;
 
-  return (
-    <div className="rounded-lg border border-border-default bg-bg-inset overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border-subtle">
-        <span className="text-xs font-mono text-text-tertiary uppercase tracking-wide">
-          {label}
-        </span>
-        <Button variant="ghost" size="sm" onClick={copy}>
-          {copied ? "Copied!" : "Copy"}
-        </Button>
-      </div>
-      <pre className="p-4 text-sm font-mono text-text-primary overflow-x-auto whitespace-pre">
-        {code}
-      </pre>
-    </div>
-  );
+export function outcomeSnippet(apiKeyRef = "process.env.NEXUSID_API_KEY") {
+  return `// Server: read the outcome (API-031). Only the answer, never user data.
+const r = await fetch(\`${API_BASE}/verification/sessions/\${sessionId}/outcome\`, {
+  headers: { "x-api-key": ${apiKeyRef} },
+});
+const { data } = await r.json();
+// data.outcome: "PENDING" | "VERIFIED" | "FAILED" | "DECLINED" | "EXPIRED"
+if (data.outcome === "VERIFIED") unlockCheckout();`;
 }
 
 export function VerifierIntegrationCode({
-  apiKey,
-  fields,
-  callbackUrl,
+  predicate,
+  apiKeyRef,
+  steps = ["session", "page", "outcome"],
+  className,
 }: VerifierIntegrationCodeProps) {
-  const body = JSON.stringify(
-    callbackUrl
-      ? { requestedFields: fields, callbackUrl }
-      : { requestedFields: fields },
-  );
-
-  const serverCode = `// On your server, for each page view (API-030). Never in the browser.
-const res = await fetch("${API_BASE}/verification/sessions", {
-  method: "POST",
-  headers: { "Content-Type": "application/json", "x-api-key": "${apiKey}" },
-  body: JSON.stringify(${body}),
-});
-const { data } = await res.json(); // { sessionId, nonce, expiresAt } — valid 120 s`;
-
-  const pageCode = `<div id="nexusid-verify"
-     data-session-id="{{ data.sessionId }}"
-     data-nonce="{{ data.nonce }}">
-</div>`;
-
   return (
-    <div className="space-y-3">
-      <CodeBlock label="Server — open a session" code={serverCode} />
-      <CodeBlock label="Page — HTML" code={pageCode} />
+    <div className={className ?? "space-y-3"}>
+      {steps.includes("session") && (
+        <CodeBlock label="1 · Server — open a session" code={sessionSnippet(predicate, apiKeyRef)} copiedMessage="Code copied" />
+      )}
+      {steps.includes("page") && <CodeBlock label="2 · Page — HTML" code={PAGE_SNIPPET} copiedMessage="Code copied" />}
+      {steps.includes("outcome") && (
+        <CodeBlock label="3 · Server — read the outcome" code={outcomeSnippet(apiKeyRef)} copiedMessage="Code copied" />
+      )}
     </div>
   );
 }

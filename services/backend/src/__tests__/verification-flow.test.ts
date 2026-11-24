@@ -136,13 +136,20 @@ beforeAll(async () => {
       displayName: "NexusID Test Verifier",
       apiKey: hashApiKey(TEST_API_KEY),
       trusted: true,
-      requiredPredicates: ["AGE_OVER_18", "AGE_OVER_21", "NATIONALITY_PAKISTANI"],
+      requiredPredicates: [
+        "AGE_OVER_18",
+        "AGE_OVER_21",
+        "NATIONALITY_PAKISTANI",
+      ],
     },
   });
   testVerifierId = verifierRow.id;
 
   // Generate a real credential with the issuer key
-  testCredential = await generateTestCredential(issuerKeys.privateKey, userKeys.publicKey);
+  testCredential = await generateTestCredential(
+    issuerKeys.privateKey,
+    userKeys.publicKey,
+  );
 });
 
 afterAll(async () => {
@@ -183,7 +190,9 @@ async function openRelayedRequest(
   pageUrl = DEFAULT_PAGE_URL,
 ): Promise<{ requestId: string; nonce: string; pollSecret: string }> {
   const session = await openSession(predicate);
-  const res = await relay(session.sessionId, session.nonce, pageUrl).expect(200);
+  const res = await relay(session.sessionId, session.nonce, pageUrl).expect(
+    200,
+  );
   return {
     requestId: res.body.data.requestId,
     nonce: session.nonce,
@@ -373,7 +382,11 @@ describe("Test 1b — Device pairing", () => {
       .send({
         challengeId,
         code: "not-the-code",
-        signature: signQrChallenge(challengeId, "not-the-code", userKeys.privateKey),
+        signature: signQrChallenge(
+          challengeId,
+          "not-the-code",
+          userKeys.privateKey,
+        ),
       })
       .expect(400);
   });
@@ -508,7 +521,9 @@ describe("Test 2 — Verification session and relay", () => {
     expect(windowMs).toBeLessThanOrEqual(120_000);
 
     // Nothing is routed until the extension relays it.
-    const dbReq = await prisma.verificationRequest.findUnique({ where: { id: sessionId } });
+    const dbReq = await prisma.verificationRequest.findUnique({
+      where: { id: sessionId },
+    });
     expect(dbReq!.status).toBe("pending");
     expect(dbReq!.userId).toBeNull();
     expect(getFCMSpy()).not.toHaveBeenCalled();
@@ -691,7 +706,9 @@ describe("Test 4 — Reading the outcome", () => {
 
   it("returns 404 for a non-existent session outcome", async () => {
     await request(app)
-      .get("/api/v1/verification/sessions/00000000-0000-0000-0000-000000000000/outcome")
+      .get(
+        "/api/v1/verification/sessions/00000000-0000-0000-0000-000000000000/outcome",
+      )
       .set("x-api-key", TEST_API_KEY)
       .expect(404);
   });
@@ -826,11 +843,7 @@ describe("Test 6 — Tampered proof rejected", () => {
 
     // Replace one disclosure with a crafted but invalid one
     const fakeDisclosure = Buffer.from(
-      JSON.stringify([
-        "fake-salt-000000000000",
-        "AGE_OVER_18",
-        true,
-      ]),
+      JSON.stringify(["fake-salt-000000000000", "AGE_OVER_18", true]),
     ).toString("base64url");
 
     const tamperedProof = {
@@ -1145,8 +1158,7 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .expect(200);
     otherToken = login.body.data.token;
 
-    requestId = (await openRelayedRequest(
-      "AGE_OVER_18")).requestId;
+    requestId = (await openRelayedRequest("AGE_OVER_18")).requestId;
   });
 
   it("lists the request as pending for the paired user only", async () => {
@@ -1366,6 +1378,63 @@ describe("Test 13 — Service Provider accounts", () => {
       .get("/api/v1/analytics/recent")
       .set("x-api-key", secondKey)
       .expect(200);
+  });
+
+  it("API-043 shows key data without the key; API-044 rotates (ALG-009)", async () => {
+    const before = await request(app)
+      .get("/api/v1/verifiers/api-key")
+      .set("Authorization", `Bearer ${providerToken}`)
+      .expect(200);
+    expect(before.body.data.apiKeyPrefix).toMatch(/^nxk_/);
+    expect(before.body.data).not.toHaveProperty("apiKey");
+
+    const rotated = await request(app)
+      .post("/api/v1/verifiers/api-key/regenerate")
+      .set("Authorization", `Bearer ${providerToken}`)
+      .expect(200);
+    const newKey = rotated.body.data.apiKey as string;
+    expect(rotated.body.data.apiKeyPrefix).toBe(newKey.slice(0, 8));
+
+    const after = await request(app)
+      .get("/api/v1/verifiers/api-key")
+      .set("Authorization", `Bearer ${providerToken}`)
+      .expect(200);
+    expect(after.body.data.apiKeyPrefix).toBe(newKey.slice(0, 8));
+    expect(JSON.stringify(after.body.data)).not.toContain(newKey);
+
+    await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("x-api-key", newKey)
+      .expect(200);
+  });
+
+  it("API-047/048 accept the portal token; a bad API key is not retried as a token", async () => {
+    const stats = await request(app)
+      .get("/api/v1/analytics/verifications?tzOffset=-300")
+      .set("Authorization", `Bearer ${providerToken}`)
+      .expect(200);
+    expect(stats.body.data).toMatchObject({
+      total: 0,
+      verified: 0,
+      successRate: null,
+    });
+    expect(stats.body.data.daily).toHaveLength(7);
+
+    const recent = await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("Authorization", `Bearer ${providerToken}`)
+      .expect(200);
+    expect(recent.body.data).toEqual([]);
+
+    await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("Authorization", `Bearer ${providerToken}`)
+      .set("x-api-key", "nxk_wrong")
+      .expect(401);
+    await request(app)
+      .get("/api/v1/analytics/recent")
+      .set("Authorization", `Bearer ${authToken}`) // End User token
+      .expect(401);
   });
 
   it("lists only its own verification requests", async () => {

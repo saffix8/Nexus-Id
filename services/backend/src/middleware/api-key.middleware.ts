@@ -9,6 +9,7 @@ import type { Verifier } from "@prisma/client";
 import prisma from "../lib/prisma.js";
 import { failure } from "../lib/response.js";
 import { hashApiKey } from "../services/verifier-account.service.js";
+import { requireVerifierJWT } from "./auth.middleware.js";
 
 declare global {
   namespace Express {
@@ -53,4 +54,39 @@ export async function requireApiKey(
   } catch (err) {
     next(err);
   }
+}
+
+/**
+ * requireVerifierAuth
+ * Service Provider routes that serve both the SP's own backend and the portal
+ * (API-047/048). An `x-api-key` header is checked as an API key (and a bad key
+ * is refused, never retried as a token); otherwise a portal JWT with role
+ * "verifier" is required. Either way `req.verifier` is set.
+ */
+export async function requireVerifierAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  if (req.header(API_KEY_HEADER)) {
+    await requireApiKey(req, res, next);
+    return;
+  }
+
+  await requireVerifierJWT(req, res, async (err?: unknown) => {
+    if (err) return next(err);
+    try {
+      const verifier = await prisma.verifier.findUnique({
+        where: { id: req.user!.sub },
+      });
+      if (!verifier) {
+        res.status(401).json(failure("Service Provider not found"));
+        return;
+      }
+      req.verifier = verifier;
+      next();
+    } catch (e) {
+      next(e);
+    }
+  });
 }

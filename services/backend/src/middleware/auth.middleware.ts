@@ -208,3 +208,29 @@ export function requireSelf(
 
   next();
 }
+
+/**
+ * requireAdmin
+ * Operator-only routes (audit logs, fraud flags). An End User JWT whose email
+ * is listed in the comma-separated ADMIN_EMAILS env var. Unset = nobody:
+ * default-deny, so a fresh deployment never exposes the audit trail to every
+ * signed-in user.
+ */
+export async function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  await verifyJWT(req, res, () => {
+    const admins = (process.env.ADMIN_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const email = typeof req.user?.email === 'string' ? req.user.email.toLowerCase() : '';
+    if (!email || !admins.includes(email)) {
+      res.status(403).json(unauthorizedResponse('Administrator access required'));
+      return;
+    }
+    next();
+  });
+}

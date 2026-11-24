@@ -1,6 +1,12 @@
-import { createHash } from 'crypto';
-import { importSPKI, jwtVerify, decodeProtectedHeader } from 'jose';
-import type { Presentation, Proof } from '@nexusid/types';
+import { createHash } from "crypto";
+import {
+  importSPKI,
+  jwtVerify,
+  decodeProtectedHeader,
+  exportJWK,
+  type JWK,
+} from "jose";
+import type { Presentation, Proof } from "@nexusid/types";
 
 // ─── Typed Error Classes ──────────────────────────────────────────────────────
 
@@ -10,23 +16,23 @@ export class VerifierError extends Error {
     public readonly code: VerifierErrorCode,
   ) {
     super(message);
-    this.name = 'VerifierError';
+    this.name = "VerifierError";
   }
 }
 
 export type VerifierErrorCode =
-  | 'INVALID_ISSUER_SIGNATURE'
-  | 'EXPIRED_CREDENTIAL'
-  | 'INVALID_DISCLOSURE_HASH'
-  | 'DISCLOSURE_DECODE_FAILED'
-  | 'MISSING_SD_ARRAY'
-  | 'INVALID_KEY_BINDING_SIGNATURE'
-  | 'KEY_BINDING_AUD_MISMATCH'
-  | 'KEY_BINDING_NONCE_MISMATCH'
-  | 'KEY_BINDING_SD_HASH_MISMATCH'
-  | 'INVALID_KEY_BINDING_FORMAT'
-  | 'INVALID_PUBLIC_KEY'
-  | 'PROOF_VERIFICATION_FAILED';
+  | "INVALID_ISSUER_SIGNATURE"
+  | "EXPIRED_CREDENTIAL"
+  | "INVALID_DISCLOSURE_HASH"
+  | "DISCLOSURE_DECODE_FAILED"
+  | "MISSING_SD_ARRAY"
+  | "INVALID_KEY_BINDING_SIGNATURE"
+  | "KEY_BINDING_AUD_MISMATCH"
+  | "KEY_BINDING_NONCE_MISMATCH"
+  | "KEY_BINDING_SD_HASH_MISMATCH"
+  | "INVALID_KEY_BINDING_FORMAT"
+  | "INVALID_PUBLIC_KEY"
+  | "PROOF_VERIFICATION_FAILED";
 
 // ─── Internal Helpers ─────────────────────────────────────────────────────────
 
@@ -34,9 +40,7 @@ export type VerifierErrorCode =
  * SHA-256 a string and return the result as base64url (no padding).
  */
 function sha256Base64url(input: string): string {
-  return createHash('sha256')
-    .update(input, 'utf8')
-    .digest('base64url');
+  return createHash("sha256").update(input, "utf8").digest("base64url");
 }
 
 /**
@@ -47,9 +51,9 @@ function sha256Base64url(input: string): string {
 function computeSdHash(presentation: Presentation): string {
   const combined =
     presentation.sd_jwt +
-    '~' +
-    presentation.disclosures.join('~') +
-    (presentation.disclosures.length > 0 ? '~' : '');
+    "~" +
+    presentation.disclosures.join("~") +
+    (presentation.disclosures.length > 0 ? "~" : "");
   return sha256Base64url(combined);
 }
 
@@ -57,14 +61,18 @@ function computeSdHash(presentation: Presentation): string {
  * Decode a single base64url-encoded disclosure into [salt, field, value].
  * A disclosure is: base64url( JSON( [salt, field_name, field_value] ) )
  */
-function decodeDisclosure(disclosure: string): { salt: string; field: string; value: unknown } {
+function decodeDisclosure(disclosure: string): {
+  salt: string;
+  field: string;
+  value: unknown;
+} {
   let json: string;
   try {
-    json = Buffer.from(disclosure, 'base64url').toString('utf8');
+    json = Buffer.from(disclosure, "base64url").toString("utf8");
   } catch {
     throw new VerifierError(
       `Failed to base64url-decode disclosure: ${disclosure.slice(0, 20)}...`,
-      'DISCLOSURE_DECODE_FAILED',
+      "DISCLOSURE_DECODE_FAILED",
     );
   }
 
@@ -74,19 +82,19 @@ function decodeDisclosure(disclosure: string): { salt: string; field: string; va
   } catch {
     throw new VerifierError(
       `Disclosure is not valid JSON after decoding`,
-      'DISCLOSURE_DECODE_FAILED',
+      "DISCLOSURE_DECODE_FAILED",
     );
   }
 
   if (
     !Array.isArray(parsed) ||
     parsed.length !== 3 ||
-    typeof parsed[0] !== 'string' ||
-    typeof parsed[1] !== 'string'
+    typeof parsed[0] !== "string" ||
+    typeof parsed[1] !== "string"
   ) {
     throw new VerifierError(
       `Disclosure array must be [salt: string, field: string, value: unknown]`,
-      'DISCLOSURE_DECODE_FAILED',
+      "DISCLOSURE_DECODE_FAILED",
     );
   }
 
@@ -115,22 +123,22 @@ export async function verifyIssuerSignature(
   let publicKey: Awaited<ReturnType<typeof importSPKI>>;
 
   try {
-    publicKey = await importSPKI(issuerPublicKey, 'RS256');
+    publicKey = await importSPKI(issuerPublicKey, "RS256");
   } catch (err) {
     return {
       valid: false,
       payload: {},
-      issuer: '',
+      issuer: "",
       error: `Failed to import issuer public key: ${(err as Error).message}`,
     };
   }
 
   try {
     const { payload } = await jwtVerify(sd_jwt, publicKey, {
-      algorithms: ['RS256'],
+      algorithms: ["RS256"],
     });
 
-    const issuer = typeof payload.iss === 'string' ? payload.iss : '';
+    const issuer = typeof payload.iss === "string" ? payload.iss : "";
 
     return {
       valid: true,
@@ -138,13 +146,13 @@ export async function verifyIssuerSignature(
       issuer,
     };
   } catch (err) {
-    const message = (err as Error).message ?? 'Unknown verification error';
-    const isExpired = message.toLowerCase().includes('exp');
+    const message = (err as Error).message ?? "Unknown verification error";
+    const isExpired = message.toLowerCase().includes("exp");
 
     return {
       valid: false,
       payload: {},
-      issuer: '',
+      issuer: "",
       error: isExpired
         ? `Credential has expired: ${message}`
         : `Issuer signature verification failed: ${message}`,
@@ -172,7 +180,7 @@ export function verifyDisclosures(
   payload: Record<string, unknown>,
 ): DisclosureVerificationResult {
   // _sd must be a non-empty array of base64url strings
-  const sdArray = payload['_sd'];
+  const sdArray = payload["_sd"];
   if (!Array.isArray(sdArray)) {
     return {
       valid: false,
@@ -240,6 +248,8 @@ export async function verifyKeyBinding(
     expectedAud: string;
     expectedNonce: string;
     userPublicKey: string;
+    /** Max age of the KB-JWT `iat`, in seconds (default 60 — ALG-002 step 4). */
+    maxProofAgeSeconds?: number;
   },
 ): Promise<KeyBindingVerificationResult> {
   // 1. Validate the typ header is "kb+jwt"
@@ -253,17 +263,17 @@ export async function verifyKeyBinding(
     };
   }
 
-  if (header['typ'] !== 'kb+jwt') {
+  if (header["typ"] !== "kb+jwt") {
     return {
       valid: false,
-      error: `Key-binding JWT typ must be 'kb+jwt', got '${header['typ']}'`,
+      error: `Key-binding JWT typ must be 'kb+jwt', got '${header["typ"]}'`,
     };
   }
 
   // 2. Import the user's public key
   let publicKey: Awaited<ReturnType<typeof importSPKI>>;
   try {
-    publicKey = await importSPKI(params.userPublicKey, 'RS256');
+    publicKey = await importSPKI(params.userPublicKey, "RS256");
   } catch (err) {
     return {
       valid: false,
@@ -275,8 +285,8 @@ export async function verifyKeyBinding(
   let kbPayload: Record<string, unknown>;
   try {
     const result = await jwtVerify(keyBinding, publicKey, {
-      algorithms: ['RS256'],
-      typ: 'kb+jwt',
+      algorithms: ["RS256"],
+      typ: "kb+jwt",
     });
     kbPayload = result.payload as Record<string, unknown>;
   } catch (err) {
@@ -287,15 +297,15 @@ export async function verifyKeyBinding(
   }
 
   // 4. aud check
-  if (kbPayload['aud'] !== params.expectedAud) {
+  if (kbPayload["aud"] !== params.expectedAud) {
     return {
       valid: false,
-      error: `Key-binding aud mismatch — expected '${params.expectedAud}', got '${String(kbPayload['aud'])}'`,
+      error: `Key-binding aud mismatch — expected '${params.expectedAud}', got '${String(kbPayload["aud"])}'`,
     };
   }
 
   // 5. nonce check
-  if (kbPayload['nonce'] !== params.expectedNonce) {
+  if (kbPayload["nonce"] !== params.expectedNonce) {
     return {
       valid: false,
       error: `Key-binding nonce mismatch — possible replay attack`,
@@ -304,13 +314,80 @@ export async function verifyKeyBinding(
 
   // 6. sd_hash check
   const expectedSdHash = computeSdHash(presentation);
-  if (kbPayload['sd_hash'] !== expectedSdHash) {
+  if (kbPayload["sd_hash"] !== expectedSdHash) {
     return {
       valid: false,
       error: `Key-binding sd_hash mismatch — presentation may have been tampered`,
     };
   }
 
+  // 7. Proof age (ALG-002 step 4): iat required, not older than the limit,
+  //    and not meaningfully in the future.
+  const iat = kbPayload["iat"];
+  if (typeof iat !== "number") {
+    return { valid: false, error: "Key-binding JWT is missing iat" };
+  }
+  const maxAge = params.maxProofAgeSeconds ?? DEFAULT_MAX_PROOF_AGE_SECONDS;
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (iat > nowSec + CLOCK_SKEW_SECONDS) {
+    return { valid: false, error: "Key-binding JWT iat is in the future" };
+  }
+  if (nowSec - iat > maxAge) {
+    return {
+      valid: false,
+      error: `Proof is too old (${nowSec - iat}s > ${maxAge}s limit)`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/** ALG-002 step 4: proof age must be ≤ 60 s at verification time. */
+export const DEFAULT_MAX_PROOF_AGE_SECONDS = 60;
+const CLOCK_SKEW_SECONDS = 5;
+
+// ─── Holder binding (RFC 7800 cnf) ────────────────────────────────────────────
+
+/**
+ * Checks the credential was issued to `userPublicKey`: the issuer-signed
+ * `cnf.jwk` must carry the same RSA modulus and exponent. Without this, anyone
+ * holding a copy of someone else's credential could present it with their own
+ * key and the key-binding check would still pass.
+ */
+export async function verifyHolderBinding(
+  payload: Record<string, unknown>,
+  userPublicKey: string,
+): Promise<KeyBindingVerificationResult> {
+  const cnf = payload["cnf"] as { jwk?: Record<string, unknown> } | undefined;
+  const jwk = cnf?.jwk;
+  if (!jwk || typeof jwk !== "object" || typeof jwk["n"] !== "string") {
+    return {
+      valid: false,
+      error:
+        "Credential has no holder binding (cnf.jwk) — cannot confirm it belongs to this holder",
+    };
+  }
+  let userJwk: JWK;
+  try {
+    userJwk = await exportJWK(
+      await importSPKI(userPublicKey, "RS256", { extractable: true }),
+    );
+  } catch (err) {
+    return {
+      valid: false,
+      error: `Failed to import user public key: ${(err as Error).message}`,
+    };
+  }
+  if (
+    jwk["kty"] !== "RSA" ||
+    jwk["n"] !== userJwk.n ||
+    jwk["e"] !== userJwk.e
+  ) {
+    return {
+      valid: false,
+      error: "Credential is bound to a different holder key (cnf mismatch)",
+    };
+  }
   return { valid: true };
 }
 
@@ -341,6 +418,14 @@ export async function verifyProof(
     userPublicKey: string;
     expectedNonce: string;
     verifierId: string;
+    /**
+     * Fields the verification request asked for. When given, the disclosed
+     * fields must match this set exactly — a proof that withholds a requested
+     * field, or reveals one that was not requested, is rejected.
+     */
+    expectedFields?: string[];
+    /** Override the KB-JWT age limit (seconds). */
+    maxProofAgeSeconds?: number;
   },
 ): Promise<ProofVerificationResult> {
   const { presentation, key_binding } = proof;
@@ -355,7 +440,7 @@ export async function verifyProof(
     return {
       valid: false,
       verifiedFields: {},
-      issuer: '',
+      issuer: "",
       error: issuerResult.error,
     };
   }
@@ -380,6 +465,7 @@ export async function verifyProof(
     expectedAud: params.verifierId,
     expectedNonce: params.expectedNonce,
     userPublicKey: params.userPublicKey,
+    maxProofAgeSeconds: params.maxProofAgeSeconds,
   });
 
   if (!kbResult.valid) {
@@ -389,6 +475,39 @@ export async function verifyProof(
       issuer: issuerResult.issuer,
       error: kbResult.error,
     };
+  }
+
+  // ── Step 4: Holder binding — credential issued to this key ──────────────
+  const bindingResult = await verifyHolderBinding(
+    issuerResult.payload,
+    params.userPublicKey,
+  );
+  if (!bindingResult.valid) {
+    return {
+      valid: false,
+      verifiedFields: {},
+      issuer: issuerResult.issuer,
+      error: bindingResult.error,
+    };
+  }
+
+  // ── Step 5: Disclosed fields answer the request exactly ─────────────────
+  if (params.expectedFields) {
+    const disclosed = Object.keys(disclosureResult.verifiedClaims);
+    const expected = new Set(params.expectedFields);
+    const missing = params.expectedFields.filter((f) => !disclosed.includes(f));
+    const extra = disclosed.filter((f) => !expected.has(f));
+    if (missing.length > 0 || extra.length > 0) {
+      return {
+        valid: false,
+        verifiedFields: {},
+        issuer: issuerResult.issuer,
+        error:
+          "Disclosed fields do not match the request" +
+          (missing.length ? ` — missing: ${missing.join(", ")}` : "") +
+          (extra.length ? ` — not requested: ${extra.join(", ")}` : ""),
+      };
+    }
   }
 
   // ── All checks passed ─────────────────────────────────────────────────────

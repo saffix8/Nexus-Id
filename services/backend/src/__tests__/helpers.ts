@@ -47,8 +47,8 @@ export async function generateTestKeyPair(): Promise<TestKeyPair> {
 
 export async function generateTestCredential(
   issuerPrivateKey: string,
+  holderPublicKey: string,
   overrides: Partial<{
-    subject: string;
     issuerDID: string;
     keyId: string;
     expiresInDays: number;
@@ -93,7 +93,7 @@ export async function generateTestCredential(
     claims: selectiveClaims,
     alwaysVisibleClaims,
     issuerDID: overrides.issuerDID ?? 'hec.gov.pk',
-    subject: overrides.subject ?? 'FA19-BCS-101',
+    holderPublicKey,
     issuerPrivateKey,
     keyId: overrides.keyId ?? 'hec-test-key-v1',
     expiresInDays: overrides.expiresInDays ?? 365,

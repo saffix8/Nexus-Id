@@ -87,10 +87,10 @@ export async function buildCredential(
     credential_type: "employment",
     issuer_name: "LinkedIn",
     verified: true,
-    profile_id: profile.id,
   };
 
   const selectiveFields: RawClaim[] = [
+    { field: "profile_id", value: profile.id },
     { field: "name", value: fullName },
     { field: "email", value: profile.email },
     { field: "current_company", value: currentPosition?.company ?? "" },
@@ -106,7 +106,7 @@ export async function buildCredential(
     claims: selectiveFields,
     alwaysVisibleClaims,
     issuerDID: "linkedin.com",
-    subject: profile.id,
+    holderPublicKey: userPublicKey,
     issuerPrivateKey,
     keyId: "linkedin-issuer-key-v1",
     expiresInDays: 90, // LinkedIn data changes frequently; shorter TTL

@@ -73,7 +73,7 @@ export async function buildCredential(
     claims: selectiveClaims,
     alwaysVisibleClaims,
     issuerDID: "nadra.gov.pk",
-    subject: nadraData.cnic,
+    holderPublicKey: userPublicKey,
     issuerPrivateKey,
     keyId: "nadra-key-v1",
     expiresInDays: 365,

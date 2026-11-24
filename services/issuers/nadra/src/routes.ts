@@ -189,21 +189,18 @@ router.get('/.well-known/jwks.json', async (_req: Request, res: Response) => {
     return res.status(503).json({ error: 'Issuer public key not configured' });
   }
 
-  // Parse RSA PEM → JWK-compatible key components
-  // For a production system, use jose's exportJWK. We expose minimal metadata here.
-  return res.status(200).json({
-    keys: [
-      {
-        kty: 'RSA',
-        use: 'sig',
-        alg: 'RS256',
-        kid: 'nadra-key-v1',
-        // The backend fetches this URL and stores/caches the PEM.
-        // Full JWK export requires key parsing — done at startup in generate-issuer-keys.ts.
-        x5c: [publicKeyPem.replace(/-----[^-]+-----/g, '').replace(/\n/g, '')],
-      },
-    ],
-  });
+  // RFC 7517 JWK (n/e). x5c is for X.509 certificate chains, not bare keys.
+  try {
+    const { importSPKI, exportJWK } = await import('jose');
+    const { kty, n, e } = await exportJWK(
+      await importSPKI(publicKeyPem, 'RS256', { extractable: true }),
+    );
+    return res.status(200).json({
+      keys: [{ kty, n, e, use: 'sig', alg: 'RS256', kid: 'nadra-key-v1' }],
+    });
+  } catch {
+    return res.status(500).json({ error: 'Issuer public key is malformed' });
+  }
 });
 
 export default router;

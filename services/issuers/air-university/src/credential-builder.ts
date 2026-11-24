@@ -68,7 +68,7 @@ export async function buildCredential(
     claims: selectiveFields,
     alwaysVisibleClaims,
     issuerDID: "au.edu.pk",
-    subject: auData.registration_number,
+    holderPublicKey: userPublicKey,
     issuerPrivateKey: privateKey,
     keyId: "au-issuer-key-v1",
     expiresInDays: 365,

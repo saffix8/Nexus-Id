@@ -50,10 +50,6 @@ export async function buildCredential(
     credential_type: "education",
     issuer_name: "Higher Education Commission Pakistan",
     verified: true,
-    // cnf (confirmation) binds this credential to the holder's public key
-    cnf: {
-      jwk: userPublicKey,
-    },
   };
 
   // Selectively disclosable fields — holder chooses which to reveal
@@ -70,7 +66,7 @@ export async function buildCredential(
       claims: selectiveFields,
       alwaysVisibleClaims,
       issuerDID: "hec.gov.pk",
-      subject: hecData.registration_number,
+      holderPublicKey: userPublicKey,
       issuerPrivateKey: privateKey,
       keyId: "hec-issuer-key-v1",
       expiresInDays: 365 * 5, // HEC degrees are valid for 5 years before re-verification

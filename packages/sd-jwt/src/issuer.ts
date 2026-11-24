@@ -5,16 +5,38 @@
  * Used by: NADRA, HEC, Air University, and LinkedIn issuer microservices
  */
 
-import { SignJWT, generateKeyPair, exportPKCS8, exportSPKI, importPKCS8 } from 'jose';
-import { randomBytes, createHash } from 'crypto';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  SignJWT,
+  generateKeyPair,
+  exportPKCS8,
+  exportSPKI,
+  importPKCS8,
+  importSPKI,
+  exportJWK,
+} from "jose";
+
+/** Payload claims the library owns; issuers may not set them directly. */
+const RESERVED_PAYLOAD_CLAIMS = new Set([
+  "iss",
+  "sub",
+  "iat",
+  "nbf",
+  "exp",
+  "jti",
+  "_sd",
+  "_sd_alg",
+  "cnf",
+]);
+import { randomBytes, createHash } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 
 // ─── Type Imports ────────────────────────────────────────────────────────────
 // Inline type definitions matching @nexusid/types (used here to keep the
 // library self-contained; consumers should import from @nexusid/types)
 
-export type CredentialType = 'identity' | 'education' | 'employment' | 'enrollment';
-export type CredentialStatus = 'active' | 'expired' | 'revoked';
+export type CredentialType =
+  "identity" | "education" | "employment" | "enrollment";
+export type CredentialStatus = "active" | "expired" | "revoked";
 
 export interface RawClaim {
   field: string;
@@ -47,21 +69,24 @@ export class SDJWTIssuanceError extends Error {
     public override readonly cause?: unknown,
   ) {
     super(message);
-    this.name = 'SDJWTIssuanceError';
+    this.name = "SDJWTIssuanceError";
   }
 }
 
 export class InvalidPrivateKeyError extends SDJWTIssuanceError {
   constructor(cause?: unknown) {
-    super('Failed to import issuer private key. Ensure it is a valid RSA PEM string.', cause);
-    this.name = 'InvalidPrivateKeyError';
+    super(
+      "Failed to import issuer private key. Ensure it is a valid RSA PEM string.",
+      cause,
+    );
+    this.name = "InvalidPrivateKeyError";
   }
 }
 
 export class KeyGenerationError extends SDJWTIssuanceError {
   constructor(cause?: unknown) {
-    super('Failed to generate RSA key pair.', cause);
-    this.name = 'KeyGenerationError';
+    super("Failed to generate RSA key pair.", cause);
+    this.name = "KeyGenerationError";
   }
 }
 
@@ -71,15 +96,19 @@ export class KeyGenerationError extends SDJWTIssuanceError {
  * Encode a value to base64url (no padding).
  */
 function base64urlEncode(input: string | Buffer): string {
-  const buf = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
-  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const buf = typeof input === "string" ? Buffer.from(input, "utf8") : input;
+  return buf
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=/g, "");
 }
 
 /**
  * SHA-256 hash a string, return base64url-encoded digest.
  */
 function sha256Base64url(input: string): string {
-  const hash = createHash('sha256').update(input).digest();
+  const hash = createHash("sha256").update(input).digest();
   return base64urlEncode(hash);
 }
 
@@ -90,16 +119,16 @@ function sha256Base64url(input: string): string {
 function resolveCredentialType(
   alwaysVisibleClaims: Record<string, unknown>,
 ): CredentialType {
-  const t = alwaysVisibleClaims['credential_type'];
+  const t = alwaysVisibleClaims["credential_type"];
   if (
-    t === 'identity' ||
-    t === 'education' ||
-    t === 'employment' ||
-    t === 'enrollment'
+    t === "identity" ||
+    t === "education" ||
+    t === "employment" ||
+    t === "enrollment"
   ) {
     return t;
   }
-  return 'identity';
+  return "identity";
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -154,8 +183,12 @@ export interface CreateCredentialParams {
   alwaysVisibleClaims: Record<string, unknown>;
   /** Issuer DID / domain — e.g. "nadra.gov.pk". Becomes the JWT `iss` claim. */
   issuerDID: string;
-  /** Subject identifier — e.g. CNIC or degree number. Becomes JWT `sub`. */
-  subject: string;
+  /**
+   * Holder's device public key (SPKI PEM). Embedded as `cnf.jwk` (RFC 7800)
+   * so a verifier can check the key-binding JWT was signed by the key this
+   * credential was issued to — not just by whoever submitted it.
+   */
+  holderPublicKey: string;
   /** RSA-2048 private key in PKCS#8 PEM format. */
   issuerPrivateKey: string;
   /** Key ID placed in JWT `kid` header. */
@@ -189,11 +222,35 @@ export async function createCredential(
     claims,
     alwaysVisibleClaims,
     issuerDID,
-    subject,
+    holderPublicKey,
     issuerPrivateKey,
     keyId,
     expiresInDays = 365,
   } = params;
+
+  const reserved = Object.keys(alwaysVisibleClaims).filter((k) =>
+    RESERVED_PAYLOAD_CLAIMS.has(k),
+  );
+  if (reserved.length > 0) {
+    throw new SDJWTIssuanceError(
+      `alwaysVisibleClaims may not set reserved claim(s): ${reserved.join(", ")}`,
+    );
+  }
+
+  // Holder binding (RFC 7800 cnf.jwk).
+  let holderJwk: Record<string, unknown>;
+  try {
+    const key = await importSPKI(holderPublicKey, "RS256", {
+      extractable: true,
+    });
+    const { kty, n, e } = await exportJWK(key);
+    holderJwk = { kty, n, e };
+  } catch (err) {
+    throw new SDJWTIssuanceError(
+      "holderPublicKey must be a valid SPKI PEM RSA public key.",
+      err,
+    );
+  }
 
   // 1. Generate disclosures
   const { disclosures, hashedClaims } = createDisclosures(claims);
@@ -204,31 +261,34 @@ export async function createCredential(
 
   // 3. Build JWT payload
   //    _sd_alg is REQUIRED by RFC 9901 §5.2.1 when _sd is present
+  //    No `sub`: anything here is visible in EVERY presentation, so a real
+  //    identifier (CNIC, registration number) would defeat selective
+  //    disclosure and act as a cross-verifier tracking handle. Holder binding
+  //    is carried by `cnf` instead; identifiers belong in `claims`.
+  const credentialId = uuidv4();
   const payload: Record<string, unknown> = {
+    // Always-visible claims first so they can never shadow the claims below
+    ...alwaysVisibleClaims,
+
     // Standard JWT claims
     iss: issuerDID,
-    sub: subject,
     iat: now,
     nbf: now,
     exp,
-    jti: uuidv4(),
+    jti: credentialId,
 
     // SD-JWT specific
     _sd: hashedClaims,
-    _sd_alg: 'sha-256',
+    _sd_alg: "sha-256",
 
-    // cnf (confirmation) — populated with holder's public key during issuance
-    // in a production flow; left as an empty object here for the demo/FYP scope.
-    cnf: {},
-
-    // Always-visible claims spread directly into payload
-    ...alwaysVisibleClaims,
+    // cnf (confirmation) — holder's device public key as a JWK (RFC 7800)
+    cnf: { jwk: holderJwk },
   };
 
   // 4. Import private key
   let privateKey: CryptoKey;
   try {
-    privateKey = await importPKCS8(issuerPrivateKey, 'RS256');
+    privateKey = await importPKCS8(issuerPrivateKey, "RS256");
   } catch (err) {
     throw new InvalidPrivateKeyError(err);
   }
@@ -237,10 +297,10 @@ export async function createCredential(
   let sdJwt: string;
   try {
     sdJwt = await new SignJWT(payload)
-      .setProtectedHeader({ alg: 'RS256', typ: 'vc+sd-jwt', kid: keyId })
+      .setProtectedHeader({ alg: "RS256", typ: "vc+sd-jwt", kid: keyId })
       .sign(privateKey);
   } catch (err) {
-    throw new SDJWTIssuanceError('Failed to sign SD-JWT credential.', err);
+    throw new SDJWTIssuanceError("Failed to sign SD-JWT credential.", err);
   }
 
   // 6. Derive metadata if not supplied
@@ -252,9 +312,9 @@ export async function createCredential(
   for (const key of [...alwaysVisibleKeys, ...selectiveKeys]) {
     // Convert snake_case to Title Case for display labels
     derivedFieldLabels[key] = key
-      .split('_')
+      .split("_")
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
+      .join(" ");
   }
 
   const metadata: CredentialMetadata = params.metadata ?? {
@@ -271,7 +331,7 @@ export async function createCredential(
     id: uuidv4(),
     type: credentialType,
     issuer: issuerDID,
-    subject,
+    subject: credentialId, // opaque; never a real-world identifier
     sd_jwt: sdJwt,
     disclosures,
     issued_at: issuedAt,
@@ -296,11 +356,11 @@ export async function generateIssuerKeyPair(): Promise<{
   publicKey: string;
 }> {
   let keyPair: {
-  publicKey: CryptoKey;
-  privateKey: CryptoKey;
-};
+    publicKey: CryptoKey;
+    privateKey: CryptoKey;
+  };
   try {
-    keyPair = await generateKeyPair('RS256', {
+    keyPair = await generateKeyPair("RS256", {
       modulusLength: 2048,
       extractable: true,
     });

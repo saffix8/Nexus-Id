@@ -18,11 +18,11 @@ import { verifierAccountService } from "../services/verifier-account.service.js"
 const router = Router();
 
 const RegisterSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  displayName: z.string().min(1, "Organisation name is required").max(120),
+  email: z.string({ error: "Email is required" }).email("Enter a valid email address"),
+  password: z.string({ error: "Password is required" }).min(8, "Password must be at least 8 characters"),
+  displayName: z.string({ error: "Organisation name is required" }).min(1, "Organisation name is required").max(120),
   domain: z
-    .string()
+    .string({ error: "Domain is required" })
     .min(3, "Domain is required")
     .max(253)
     .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, "Enter a domain like example.com"),

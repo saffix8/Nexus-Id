@@ -532,6 +532,8 @@ export class VerificationService {
       userPublicKey: userRecord.publicKey,
       expectedNonce: request.nonce,
       verifierId: request.verifierId ?? "",
+      // ALG-002 step 6: the proof must disclose exactly what was requested.
+      expectedFields: request.requestedFields,
     });
 
     if (!verifyResult.valid) {

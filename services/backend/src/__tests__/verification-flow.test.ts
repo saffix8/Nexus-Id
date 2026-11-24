@@ -141,7 +141,7 @@ beforeAll(async () => {
   testVerifierId = verifierRow.id;
 
   // Generate a real credential with the issuer key
-  testCredential = await generateTestCredential(issuerKeys.privateKey);
+  testCredential = await generateTestCredential(issuerKeys.privateKey, userKeys.publicKey);
 });
 
 afterAll(async () => {

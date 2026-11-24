@@ -111,7 +111,9 @@ router.post(
  *
  * Exposes the issuer's public key for credential verification.
  */
-router.get("/.well-known/jwks.json", (_req: Request, res: Response): void => {
+router.get(
+  "/.well-known/jwks.json",
+  async (_req: Request, res: Response): Promise<void> => {
   const keyPath = path.resolve(__dirname, "../.keys/.issuer-public-key.pem");
 
   if (!fs.existsSync(keyPath)) {
@@ -121,27 +123,13 @@ router.get("/.well-known/jwks.json", (_req: Request, res: Response): void => {
 
   const pem = fs.readFileSync(keyPath, "utf-8");
 
-  // Convert PEM to a minimal JWK representation
-  // (Full RSA JWK generation requires the jose library — done here for completeness)
+  // RFC 7517 JWK (n/e). x5c is for X.509 certificate chains, not bare keys.
+  const { importSPKI, exportJWK } = await import("jose");
+  const { kty, n, e } = await exportJWK(
+    await importSPKI(pem, "RS256", { extractable: true }),
+  );
   res.json({
-    keys: [
-      {
-        kty: "RSA",
-        use: "sig",
-        alg: "RS256",
-        kid: "au-issuer-key-v1",
-        // Base64url-encoded key material is extracted server-side by the
-        // verification service using jose's importSPKI + exportJWK.
-        // Clients should use the backend's GET /issuers/:id/public-key endpoint
-        // which returns a fully-formed JWK — this endpoint is a discovery fallback.
-        x5c: [
-          pem.replace(
-            /-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\n/g,
-            "",
-          ),
-        ],
-      },
-    ],
+    keys: [{ kty, n, e, use: "sig", alg: "RS256", kid: "au-issuer-key-v1" }],
   });
 });
 

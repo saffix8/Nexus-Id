@@ -27,24 +27,25 @@ app.get("/health", (_req, res) => {
 });
 
 // JWKS endpoint at root level (non-prefixed) for standard discovery
-app.get("/.well-known/jwks.json", (_req, res) => {
+app.get("/.well-known/jwks.json", async (_req, res) => {
   const publicKeyPem = process.env.NADRA_ISSUER_PUBLIC_KEY;
 
   if (!publicKeyPem) {
     return res.status(503).json({ error: "Issuer public key not configured" });
   }
 
-  return res.json({
-    keys: [
-      {
-        kty: "RSA",
-        use: "sig",
-        alg: "RS256",
-        kid: "nadra-key-v1",
-        x5c: [publicKeyPem.replace(/-----[^-]+-----/g, "").replace(/\n/g, "")],
-      },
-    ],
-  });
+  // RFC 7517 JWK (n/e). x5c is for X.509 certificate chains, not bare keys.
+  try {
+    const { importSPKI, exportJWK } = await import("jose");
+    const { kty, n, e } = await exportJWK(
+      await importSPKI(publicKeyPem, "RS256", { extractable: true }),
+    );
+    return res.json({
+      keys: [{ kty, n, e, use: "sig", alg: "RS256", kid: "nadra-key-v1" }],
+    });
+  } catch {
+    return res.status(500).json({ error: "Issuer public key is malformed" });
+  }
 });
 
 app.use("/api/v1/credentials/nadra", nadraRouter);

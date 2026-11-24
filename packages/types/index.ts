@@ -34,7 +34,7 @@ export interface SDJWTCredential {
   id: string;
   type: CredentialType;
   issuer: string;          // IssuerID — e.g. "nadra.gov.pk"
-  subject: string;         // CNIC, degree number, etc.
+  subject: string;         // opaque credential ID (= JWT jti); never a real identifier
   sd_jwt: string;          // The compact JWT string (header.payload.signature)
   disclosures: Disclosure[]; // All disclosure strings for this credential
   issued_at: string;       // ISO timestamp

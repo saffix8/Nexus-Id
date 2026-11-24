@@ -312,7 +312,7 @@ class CredentialsService {
       return {
         revoked: true,
         revokedAt: row.revokedAt?.toISOString() ?? null,
-        reason: null,
+        reason: row.revocationReason ?? null,
       };
     }
 
@@ -325,7 +325,11 @@ class CredentialsService {
         : new Date();
       await prisma.credential.update({
         where: { id: row.id },
-        data: { status: "revoked", revokedAt },
+        data: {
+          status: "revoked",
+          revokedAt,
+          revocationReason: chainStatus.reason ?? null,
+        },
       });
       return {
         revoked: true,
@@ -352,7 +356,7 @@ class CredentialsService {
     const revokedAt = new Date();
     await prisma.credential.update({
       where: { id: row.id },
-      data: { status: "revoked", revokedAt },
+      data: { status: "revoked", revokedAt, revocationReason: reason },
     });
 
     // Fire-and-forget — fails silently by design (see blockchain.service.ts)

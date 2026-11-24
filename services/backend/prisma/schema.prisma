@@ -38,6 +38,7 @@ model Credential {
   issuedAt           DateTime  @map("issued_at") @db.Timestamptz(6)
   expiresAt          DateTime  @map("expires_at") @db.Timestamptz(6)
   revokedAt          DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revocationReason   String?   @map("revocation_reason")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 

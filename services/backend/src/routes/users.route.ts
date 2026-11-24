@@ -105,13 +105,25 @@ router.put(
 
       const userId = req.user!.sub;
 
-      await prisma.user.update({
+      // updateMany so a token for a deleted account (e.g. after a DB re-seed)
+      // gets a clear 401 instead of Prisma's generic "Record not found".
+      const updated = await prisma.user.updateMany({
         where: { id: userId },
         data: {
           publicKey: parsed.data.public_key,
           updatedAt: new Date(),
         },
       });
+      if (updated.count === 0) {
+        res
+          .status(401)
+          .json(
+            failure(
+              "Your session belongs to an account that no longer exists. Sign out and sign in again.",
+            ),
+          );
+        return;
+      }
 
       await writeAuditLog("public_key_updated", { user_id: userId });
 

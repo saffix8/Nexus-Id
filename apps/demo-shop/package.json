@@ -1,0 +1,16 @@
+{
+  "name": "@nexusid/demo-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shop A — demo merchant site that integrates NexusID age verification (FR-032, FR-043, FR-045)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "vite": "6.3.5"
+  }
+}

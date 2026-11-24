@@ -1,3 +1,75 @@
+# NexusID — Phase 5: Extension popup redesign (2026-11-24)
+
+SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2 OutcomeBadge, §5.6 PredicateChip).
+
+## Extension (`apps/extension`)
+- Now TypeScript bundled by esbuild (`npm run build -w apps/extension` → `dist/`); `@types/chrome` 0.3.7. Load the
+  `apps/extension` folder unpacked; `manifest.json` points at `dist/background.js`, `popup.html` loads `dist/popup.js`.
+  Old `background.js`, `popup.js`, `config.js` removed. `content.js` unchanged (same message protocol; Shop A unaffected).
+- Popup states: loading skeleton → Not paired (QR via API-023, 120 s ring turning warning at 30 s / danger at 10 s, blur +
+  "Code expired · New code", "Paired ✓" moment) → Paired idle (device name, inline Unpair confirm, no dialogs) → Request
+  pending (platform, host, PredicateChip with mono code, pulsing "Waiting for your phone…", session countdown) →
+  Verified (drawn check) / Failed / Declined / Expired with Dismiss. Error state with Retry when the backend is down.
+  Predicate labels/colours come from `packages/types` (aliased to source in the build).
+- Worker: relay API-032 with pairing token, poll API-033 with poll secret. `chrome.alarms` (30 s, Chrome's minimum) is the
+  durable scheduler that survives worker suspension; a 2 s loop runs while the worker is awake, and the open popup nudges
+  it every 2 s. FR-033 notifications on relay ("Shop A asks: Age over 18 — check your phone") and on every outcome.
+  Action badge shows pending/verified. Popup never shows claim values.
+- Permissions: storage, notifications, alarms, activeTab, scripting.
+
+## Backend
+- API-024 `GET /qr-challenges/:id` now also returns `active` and `deviceName` (from `users.device_info.model`).
+- New `DELETE /api/v1/pairings/self` (x-pairing-token): the extension revokes its own pairing on Unpair (idempotent, audited).
+- Backend tests: 100/100 pass.
+
+## Verified live (2026-11-25, in Chrome)
+- Step 5: popup QR → `/pair` link → popup "Paired ✓" → Ready. Unpair from the popup revoked the pairing server-side.
+- Steps 6 + 9: three Shop A sessions relayed by the extension and completed VERIFIED after approval on
+  `/dashboard/requests` (web stand-in for the phone).
+- Not yet exercised live: Declined / Expired popup states (step 11).
+
+## Fixes found during the live check
+- Web `AddCredentialModal` `apiFetch` returned the `{ success, data }` envelope, so NADRA's verify-otp got
+  `session_id: undefined` (Zod "expected string") and every issuer's credential was dropped before reaching the
+  browser wallet. It now unwraps `data`. Added input masks: CNIC auto-dashes (12345-1234567-1), phone strips
+  spaces/dashes, OTP digits only.
+- `PUT /users/me/public-key` returns 401 "account no longer exists, sign in again" instead of Prisma's
+  "Record not found" when the session token points at a deleted user (stale cookie).
+- Known: the web holder key is stored once per browser, not per account. Switching End User accounts in one Chrome
+  profile breaks pairing ("No device key is registered"). Use one account per profile for the demo.
+- Dev DB: a few `diag…@example.test` users were created by these checks.
+
+---
+
+# NexusID — Phase 4: Demo shop "Shop A" (2026-11-24)
+
+New workspace **`apps/demo-shop`** (plain Vite 6.3.5 + TS, **http://localhost:3001**). Chosen over a route in `apps/web`
+because the web root layout forces the dark theme, and a separate origin makes Shop A look like someone else's site.
+The extension needs nothing new: it already detects any `#nexusid-verify` (including ones added later via MutationObserver).
+
+- **Page** (DESIGN §6.4): light e-commerce checkout for an 18+ game (product, order summary), dark NexusID card
+  ("Verify your age with NexusID", status + 2-min countdown, extension mount slot, "Only the answer is shared…",
+  collapsible "What this page embeds" showing the live snippet). VERIFIED → green "Age verified · no personal data shared"
+  banner + "Place order" unlocks (lock opens, pulse). DECLINED / EXPIRED / FAILED / session error → specific message +
+  **Try again** (new session, fresh `#nexusid-verify` node). If the extension doesn't take over the element within 2.5 s
+  the slot says the extension is not installed.
+- **Server routes** (`server/shop-api.ts`, Node-only Vite middleware for `vite` and `vite preview`):
+  `POST /shop-api/session` → API-030 (`AGE_OVER_18`), `GET /shop-api/session/:id/outcome` → API-031,
+  `POST /shop-api/order` re-checks API-031 server-side (must be VERIFIED; one order per session). The `nexusid:result`
+  page event only triggers an early poll; it is never trusted.
+- **API key** read from `SHOP_A_API_KEY` (not `VITE_`-prefixed, so never exposed) with the seeded
+  `nxk_shop_a_demo_key_2026` as default; `NEXUSID_API_URL` defaults to `http://localhost:4000/api/v1`.
+  `vite build` output grepped: no key, no `x-api-key`.
+- Snippet: `data-session-id`, `data-nonce` (what content.js reads) + `data-platform`, `data-condition` (informational;
+  the extension shows the platform/condition from the backend, FR-032).
+- `dev-start.sh` step 6 starts it; root `npm run dev:shop`, and root `npm run dev` now starts it too.
+- Checked in headless Chrome against the live backend: pending → verified → order placed, declined → Try again (new
+  session), expired, failed, 390 px (no horizontal scroll), no console errors. Outcomes were simulated by updating the
+  test sessions' status in `nexusid_db` (≈8 extra Shop A sessions in its log). The real phone/extension loop is Phase 5–6.
+- Note: the dev DB is actually **`nexusid_db`** (user `nexusid`), not `nexusid` as CLAUDE.md says.
+
+---
+
 # NexusID — Phase 3: Service Provider portal (2026-11-24)
 
 Backend Jest **100/100** (2 new tests). `tsc --noEmit` clean (backend, web). `next build` passes. Every screen checked

@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Checkout · Shop A</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="logo" href="/" aria-label="Shop A home">
+          <span class="logo-mark" aria-hidden="true">A</span>
+          <span class="logo-text">Shop A</span>
+        </a>
+        <nav class="nav" aria-label="Main">
+          <a href="#">Games</a>
+          <a href="#">Consoles</a>
+          <a href="#">Accessories</a>
+          <a href="#">Deals</a>
+        </nav>
+        <a class="cart" href="#" aria-label="Cart, 1 item">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              d="M6 6h15l-1.5 9h-12z M6 6 5 3H2 M9 20a1 1 0 1 0 0-.01 M18 20a1 1 0 1 0 0-.01"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="cart-count">1</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="container page">
+      <ol class="steps" aria-label="Checkout progress">
+        <li class="done">Cart</li>
+        <li class="current" aria-current="step">Checkout</li>
+        <li>Confirmation</li>
+      </ol>
+
+      <div class="layout">
+        <!-- Product -->
+        <section class="product card" aria-labelledby="product-title">
+          <div class="product-image" aria-hidden="true">
+            <svg viewBox="0 0 320 220" role="img">
+              <rect width="320" height="220" rx="14" fill="#1F2937" />
+              <circle cx="232" cy="70" r="34" fill="#F3F4F6" opacity=".92" />
+              <circle cx="246" cy="62" r="30" fill="#1F2937" />
+              <path
+                d="M0 170 L60 120 L110 150 L170 95 L230 140 L280 110 L320 135 L320 220 L0 220Z"
+                fill="#374151"
+              />
+              <path
+                d="M0 190 L80 150 L140 175 L210 135 L320 180 L320 220 L0 220Z"
+                fill="#4B5563"
+              />
+              <text
+                x="24"
+                y="48"
+                fill="#F9FAFB"
+                font-family="Georgia, serif"
+                font-size="24"
+                font-weight="700"
+                letter-spacing="1"
+              >
+                NIGHTFALL
+              </text>
+              <text
+                x="24"
+                y="70"
+                fill="#D1D5DB"
+                font-family="Georgia, serif"
+                font-size="13"
+                letter-spacing="3"
+              >
+                CHRONICLES
+              </text>
+              <rect
+                x="24"
+                y="168"
+                width="36"
+                height="36"
+                rx="4"
+                fill="#DC2626"
+              />
+              <text
+                x="42"
+                y="193"
+                fill="#fff"
+                font-family="Arial, sans-serif"
+                font-size="18"
+                font-weight="700"
+                text-anchor="middle"
+              >
+                18
+              </text>
+            </svg>
+          </div>
+          <div class="product-body">
+            <p class="eyebrow">PlayStation 5 · Collector's Edition</p>
+            <h1 id="product-title">Nightfall Chronicles</h1>
+            <div
+              class="rating"
+              aria-label="Rated 4.7 out of 5 from 1,284 reviews"
+            >
+              <span aria-hidden="true">★★★★★</span
+              ><span>4.7 · 1,284 reviews</span>
+            </div>
+            <p class="desc">
+              Steelbook case, 120-page art book, soundtrack download and an
+              in-game armour set. Ships in 2–3 working days.
+            </p>
+            <p class="age-note">
+              <span class="age-badge" aria-hidden="true">18</span>
+              Rated 18+. We need to confirm you are over 18 before you can
+              order.
+            </p>
+          </div>
+        </section>
+
+        <!-- Checkout -->
+        <section class="checkout" aria-labelledby="summary-title">
+          <div class="card summary">
+            <h2 id="summary-title">Order summary</h2>
+            <dl>
+              <div>
+                <dt>Nightfall Chronicles × 1</dt>
+                <dd>Rs 18,999</dd>
+              </div>
+              <div>
+                <dt>Shipping</dt>
+                <dd>Rs 250</dd>
+              </div>
+              <div class="total">
+                <dt>Total</dt>
+                <dd>Rs 19,249</dd>
+              </div>
+            </dl>
+          </div>
+
+          <!-- NexusID widget (third-party integration, dark) -->
+          <section
+            class="nx"
+            id="nx-panel"
+            aria-labelledby="nx-title"
+            data-state="loading"
+          >
+            <header class="nx-head">
+              <span class="nx-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16">
+                  <path
+                    d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="m8.5 12 2.5 2.5 4.5-5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </span>
+              <div>
+                <h2 id="nx-title">Verify your age with NexusID</h2>
+                <p class="nx-sub">Shop A wants to confirm you are over 18.</p>
+              </div>
+            </header>
+
+            <div class="nx-status" role="status" aria-live="polite">
+              <span class="nx-dot" aria-hidden="true"></span>
+              <span class="nx-status-text" id="nx-status-text"
+                >Starting a secure session…</span
+              >
+              <span class="nx-countdown" id="nx-countdown"></span>
+            </div>
+
+            <!-- The extension content script mounts into #nexusid-verify (FR-032). -->
+            <div class="nx-slot" id="nx-slot"></div>
+
+            <div class="nx-banner" id="nx-banner" hidden>
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="m8 12 3 3 5-6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>Age verified · no personal data shared</span>
+            </div>
+
+            <div class="nx-problem" id="nx-problem" hidden>
+              <p class="nx-problem-title" id="nx-problem-title"></p>
+              <p class="nx-problem-body" id="nx-problem-body"></p>
+              <button type="button" class="nx-btn" id="nx-retry">
+                Try again
+              </button>
+            </div>
+
+            <p class="nx-privacy">
+              Only the answer is shared. Never your data.
+            </p>
+
+            <details class="nx-dev">
+              <summary>What this page embeds</summary>
+              <pre><code id="nx-snippet"></code></pre>
+            </details>
+          </section>
+
+          <button
+            type="button"
+            class="order-btn"
+            id="order-btn"
+            disabled
+            aria-describedby="order-hint"
+          >
+            <span class="lock" aria-hidden="true">
+              <svg
+                class="lock-closed"
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+              >
+                <rect
+                  x="5"
+                  y="11"
+                  width="14"
+                  height="10"
+                  rx="2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M8 11V7a4 4 0 0 1 8 0v4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+              </svg>
+              <svg class="lock-open" viewBox="0 0 24 24" width="18" height="18">
+                <rect
+                  x="5"
+                  y="11"
+                  width="14"
+                  height="10"
+                  rx="2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M8 11V7a4 4 0 0 1 7.5-2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <span class="order-label" id="order-label"
+              >Place order · Rs 19,249</span
+            >
+          </button>
+          <p class="order-hint" id="order-hint">
+            Verify your age to place the order.
+          </p>
+
+          <div class="card confirmation" id="confirmation" hidden tabindex="-1">
+            <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" fill="#DCFCE7" />
+              <path
+                d="m7.5 12.5 3 3 6-7"
+                fill="none"
+                stroke="#15803D"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <div>
+              <h2>Order placed</h2>
+              <p>
+                Order <strong id="order-number"></strong> is confirmed. Shop A
+                never saw your name, date of birth or CNIC.
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        © 2026 Shop A (demo merchant) · Payments are not processed
+      </div>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

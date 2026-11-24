@@ -1,0 +1,717 @@
+/* NexusID popup — SCR-011, DESIGN.md §3 tokens, §5.4 QRPanel, §6.3 layout. Dark only. */
+
+:root {
+  --bg: #0c0e13;
+  --surface: #13161e;
+  --overlay: #1a1e28;
+  --inset: #0a0c10;
+  --border: #252c3d;
+  --border-subtle: #1e2330;
+  --border-strong: #3a4560;
+  --text: #eef0f6;
+  --text-muted: #8b92a8;
+  --text-faint: #525a72;
+  --accent: #3b6fe8;
+  --accent-hover: #4a7ef7;
+  --accent-text: #7ba0ff;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+
+  --font-display:
+    "DM Sans", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --r-btn: 8px;
+  --r-card: 12px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 360px;
+  height: 560px;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.5 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+svg.icon {
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── Frame ─────────────────────────────────────────── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 560px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font: 700 15px/1 var(--font-display);
+}
+
+.wordmark {
+  font: 600 16px/1 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 11px/1 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.dot.pulse {
+  animation: pulse 1.6s var(--ease) infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.view > * {
+  animation: enter 200ms var(--ease) both;
+}
+.view > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.view > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.view > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.view > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 20px;
+  border-top: 1px solid var(--border-subtle);
+  flex: none;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 150ms ease-out;
+}
+.link:hover {
+  color: #a3bdff;
+}
+
+.meta {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-faint);
+}
+
+/* ── Type ──────────────────────────────────────────── */
+
+.eyebrow {
+  font: 500 11px/1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.title {
+  font: 600 20px/1.25 var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.center {
+  text-align: center;
+  align-items: center;
+}
+
+/* ── Buttons ───────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--r-btn);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition:
+    background 150ms ease-out,
+    border-color 150ms ease-out,
+    transform 150ms ease-out;
+}
+.btn:hover {
+  background: var(--overlay);
+  border-color: var(--border-strong);
+}
+.btn:active {
+  transform: scale(0.98);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.btn.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.btn.danger:hover {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+.btn.block {
+  width: 100%;
+}
+.btn.sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ── Icon tile (64 px, §3.6) ───────────────────────── */
+
+.tile {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  border: 1px solid;
+  flex: none;
+}
+
+.tint-success {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success) 25%, transparent);
+}
+.tint-danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
+}
+.tint-warning {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 25%, transparent);
+}
+.tint-muted {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  border-color: color-mix(in srgb, var(--text-muted) 25%, transparent);
+}
+.tint-accent {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* ── OutcomeBadge (§3.2) ───────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  font: 600 11px/1 var(--font-body);
+  letter-spacing: 0.06em;
+}
+
+/* ── PredicateChip (§5.6) ──────────────────────────── */
+
+.chip-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chip-code {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* ── Card ──────────────────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 16px;
+}
+
+/* ── QRPanel (§5.4) ────────────────────────────────── */
+
+.qr-head {
+  text-align: center;
+  margin-bottom: 16px;
+}
+.qr-head .subtitle {
+  margin-top: 4px;
+}
+
+.qr-ring {
+  position: relative;
+  width: 224px;
+  height: 224px;
+  margin: 0 auto;
+}
+
+.qr-ring svg.ring {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+
+.ring-track {
+  stroke: var(--border);
+}
+.ring-progress {
+  stroke: var(--accent);
+  transition: stroke 300ms ease-out;
+}
+.ring-progress.warn {
+  stroke: var(--warning);
+}
+.ring-progress.danger {
+  stroke: var(--danger);
+}
+
+.qr-square {
+  position: absolute;
+  inset: 16px;
+  border-radius: 14px;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.qr-square canvas {
+  width: 168px;
+  height: 168px;
+  transition:
+    filter 250ms ease-out,
+    opacity 250ms ease-out;
+}
+
+.qr-square.expired canvas,
+.qr-square.loading canvas {
+  filter: blur(6px);
+  opacity: 0.35;
+}
+
+.qr-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #0c0e13;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.qr-skeleton {
+  width: 168px;
+  height: 168px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #eceef3 0%, #f7f8fa 50%, #eceef3 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.qr-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.qr-status .count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.qr-status .sep {
+  color: var(--text-faint);
+}
+
+.steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.steps .n {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: 600 11px/1 var(--font-body);
+  flex: none;
+}
+.steps strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ── Idle / outcome layouts ────────────────────────── */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding-top: 28px;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.device-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+.device-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.privacy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.confirm {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.confirm .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ── Pending request ───────────────────────────────── */
+
+.platform {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.platform .logo {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  flex: none;
+}
+.platform .name {
+  font: 600 16px/1.3 var(--font-display);
+}
+.platform .host {
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asks {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--r-card);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent-text);
+  font-weight: 500;
+}
+.waiting .count {
+  margin-left: auto;
+  font: 400 12px/1 var(--font-mono);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.waiting .count.warn {
+  color: var(--warning);
+}
+
+/* Drawn check (§3.5: stroke draw 450 ms, then 1 → 1.05 → 1) */
+.drawn-check {
+  animation: pop 300ms var(--ease) 450ms both;
+}
+.drawn-check .draw {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw 450ms var(--ease) forwards;
+}
+.drawn-check .draw.late {
+  animation-delay: 150ms;
+}
+
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pop {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--surface) 0%,
+    var(--overlay) 50%,
+    var(--surface) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .view > * {
+    animation: none;
+  }
+  .dot.pulse {
+    animation: none;
+  }
+  .drawn-check .draw {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+}

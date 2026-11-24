@@ -13,7 +13,10 @@ import { z } from "zod";
 import { verifyJWT } from "../middleware/auth.middleware.js";
 import { ValidationError } from "../middleware/error.middleware.js";
 import { success } from "../lib/response.js";
-import { pairingService } from "../services/pairing.service.js";
+import {
+  pairingService,
+  PAIRING_TOKEN_HEADER,
+} from "../services/pairing.service.js";
 
 const router = Router();
 
@@ -27,6 +30,24 @@ router.get(
     try {
       const result = await pairingService.listForUser(req.user!.sub);
       res.status(200).json(success(result));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Extension unpairs itself (FR-038, browser side). Authenticated by the
+// pairing token; declared before /:id so "self" is never read as an ID.
+router.delete(
+  "/self",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const token = req.header(PAIRING_TOKEN_HEADER) ?? "";
+      if (!token) {
+        throw new ValidationError(`Missing ${PAIRING_TOKEN_HEADER} header`);
+      }
+      await pairingService.revokeByToken(token);
+      res.status(200).json(success(null));
     } catch (err) {
       next(err);
     }

@@ -50,6 +50,33 @@ class PairingService {
     }));
   }
 
+  /**
+   * FR-038 from the browser side — the extension unpairs itself with its own
+   * pairing token (no End User session in the browser). Idempotent: an
+   * unknown, pending or already revoked token is a no-op.
+   */
+  async revokeByToken(pairingToken: string): Promise<void> {
+    const revokedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.devicePairing.findUnique({
+        where: { secretHash: sha256(pairingToken) },
+        select: { id: true, userId: true, status: true },
+      });
+      if (!row || row.status !== "paired") return;
+
+      await tx.devicePairing.update({
+        where: { id: row.id },
+        data: { status: "revoked", revokedAt },
+      });
+      await tx.auditLog.create({
+        data: {
+          eventType: "device_pairing_revoked",
+          metadata: { user_id: row.userId, pairing_id: row.id, by: "extension" },
+        },
+      });
+    });
+  }
+
   /** API-027 / FR-038 — revoke a pairing; its requests stop routing to this user. */
   async revoke(pairingId: string, userId: string): Promise<void> {
     const revokedAt = new Date();

@@ -10,9 +10,10 @@
     "services/issuers/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\" \"npm run dev:shop\"",
     "dev:backend": "npm run dev --workspace=services/backend",
     "dev:web": "npm run dev --workspace=apps/web",
+    "dev:shop": "npm run dev --workspace=apps/demo-shop",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",

@@ -61,6 +61,21 @@ export interface QrChallengeStatus {
   state: QrChallengeState;
   expiresAt: string;
   redeemedAt: string | null;
+  /** True while the pairing is live (redeemed and not revoked). */
+  active: boolean;
+  /** Paired phone's model from its registration device_info, if known. */
+  deviceName: string | null;
+}
+
+/** Reads a display name from the device_info JSON the app registered with. */
+function deviceNameOf(info: unknown): string | null {
+  if (!info || typeof info !== "object") return null;
+  const d = info as Record<string, unknown>;
+  for (const key of ["model", "deviceName", "device_name", "name"]) {
+    const v = d[key];
+    if (typeof v === "string" && v.trim()) return v.trim().slice(0, 64);
+  }
+  return null;
 }
 
 /**
@@ -151,6 +166,7 @@ class QrChallengeService {
   ): Promise<QrChallengeStatus> {
     const row = await prisma.devicePairing.findUnique({
       where: { id: challengeId },
+      include: { user: { select: { deviceInfo: true } } },
     });
 
     // A wrong token is indistinguishable from a missing challenge.
@@ -158,12 +174,15 @@ class QrChallengeService {
       throw new NotFoundError("QR challenge");
     }
 
+    const active = row.status === "paired";
     return {
       challengeId: row.id,
       purpose: "PAIRING",
       state: challengeState(row),
       expiresAt: row.expiresAt.toISOString(),
       redeemedAt: row.pairedAt?.toISOString() ?? null,
+      active,
+      deviceName: active ? deviceNameOf(row.user?.deviceInfo) : null,
     };
   }
 
@@ -201,7 +220,7 @@ class QrChallengeService {
     // ALG-007 — the account's registered device key must have signed it.
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { publicKey: true },
+      select: { publicKey: true, deviceInfo: true },
     });
     if (!user?.publicKey) {
       throw new AppError("No device key is registered for this account", 401);
@@ -244,6 +263,8 @@ class QrChallengeService {
       state: "REDEEMED",
       expiresAt: row.expiresAt.toISOString(),
       redeemedAt: redeemedAt.toISOString(),
+      active: true,
+      deviceName: deviceNameOf(user.deviceInfo),
     };
   }
 }

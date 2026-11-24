@@ -2,6 +2,7 @@
 
 import { Dialog, Transition } from "@headlessui/react";
 import { Fragment, useState, useEffect, useRef, useCallback } from "react";
+import type { ChangeEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import type { SDJWTCredential } from "@nexusid/types";
@@ -129,15 +130,56 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
     },
   });
   const data = await res.json();
-  if (!res.ok) {
+  if (!res.ok || data?.success === false) {
     throw new Error(
       data?.error ?? data?.message ?? `Request failed (${res.status})`,
     );
+  }
+  // Backend and issuers reply { success, data, timestamp } (SRS §5.3). Callers
+  // want the payload; reading res.session_id off the envelope sent `undefined`
+  // to verify-otp and dropped every issued credential.
+  if (data && typeof data === "object" && "success" in data && "data" in data) {
+    return data.data as T;
   }
   return data as T;
 }
 
 const API = "/api/v1";
+
+// ─── Input masks ──────────────────────────────────────────────────────────────
+
+/** Digits only, dashes inserted as typed: 12345-1234567-1. */
+function formatCnic(value: string): string {
+  const d = value.replace(/\D/g, "").slice(0, 13);
+  if (d.length <= 5) return d;
+  if (d.length <= 12) return `${d.slice(0, 5)}-${d.slice(5)}`;
+  return `${d.slice(0, 5)}-${d.slice(5, 12)}-${d.slice(12)}`;
+}
+
+/** Pakistani mobile: digits, optional leading +, no spaces or dashes. */
+function formatPhone(value: string): string {
+  const plus = value.trimStart().startsWith("+");
+  const d = value.replace(/\D/g, "").slice(0, 12);
+  return plus ? `+${d}` : d.slice(0, 11);
+}
+
+function digitsOnly(value: string, max: number): string {
+  return value.replace(/\D/g, "").slice(0, max);
+}
+
+/** Wraps a react-hook-form register() result so the value is masked before RHF reads it. */
+function masked<T extends { onChange: (e: ChangeEvent<HTMLInputElement>) => unknown }>(
+  field: T,
+  mask: (v: string) => string,
+): T {
+  return {
+    ...field,
+    onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      e.target.value = mask(e.target.value);
+      return field.onChange(e);
+    },
+  };
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -423,7 +465,7 @@ function NadraFlow({
         <form onSubmit={handleOtp(submitOtp)} className="space-y-5">
           <FormField label="Verification Code" error={otpErrors.otp?.message}>
             <input
-              {...regOtp("otp")}
+              {...masked(regOtp("otp"), (v) => digitsOnly(v, 6))}
               type="text"
               inputMode="numeric"
               maxLength={6}
@@ -462,8 +504,11 @@ function NadraFlow({
           hint="Format: 12345-1234567-1"
         >
           <input
-            {...regForm("cnic")}
+            {...masked(regForm("cnic"), formatCnic)}
             type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={15}
             placeholder="12345-1234567-1"
             className={inputClass}
           />
@@ -474,9 +519,11 @@ function NadraFlow({
           error={formErrors.phone?.message}
         >
           <input
-            {...regForm("phone")}
+            {...masked(regForm("phone"), formatPhone)}
             type="tel"
-            placeholder="03XX-XXXXXXX"
+            inputMode="tel"
+            maxLength={13}
+            placeholder="03001234567"
             className={inputClass}
           />
         </FormField>
@@ -1134,7 +1181,10 @@ export function AddCredentialModal({
     try {
       await saveWebCredential(credential);
     } catch (err) {
-      console.warn("[AddCredentialModal] Could not store credential locally:", err);
+      console.warn(
+        "[AddCredentialModal] Could not store credential locally:",
+        err,
+      );
     }
     setStep({ id: "success", credential });
   }

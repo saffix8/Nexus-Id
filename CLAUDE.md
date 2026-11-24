@@ -12,7 +12,7 @@
 | Backend | `http://localhost:4000` |
 | Web portal | `http://localhost:3000` |
 | Postgres | Docker container `nexusid-postgres`, port 5432 |
-| DB name | `nexusid_db` (tests use `nexusid_db_test`) |
+| DB name | `nexusid` |
 
 ---
 
@@ -41,7 +41,10 @@ nexusid/                          ← npm workspace root
 │   └── docker-compose.yml        ← All services + postgres + nginx
 ├── docs/
 │   ├── SRS.md                    ← Full SRS Version 2.0 (source of truth)
-│   └── REQUIREMENTS.md           ← Condensed FR/API/algorithm reference ← IMPORT THIS
+│   ├── REQUIREMENTS.md           ← Condensed FR/API/algorithm reference ← IMPORT THIS
+│   ├── DESIGN.md                 ← Design System v2 (tokens, components, screens) ← read before any UI work
+│   ├── DEMO_BUILD.md             ← Demo plan + ordered build phases with prompts
+│   └── STATUS.md                 ← Current state (written by Phase 0 audit)
 └── CLAUDE.md                     ← This file
 ```
 
@@ -62,6 +65,9 @@ The REQUIREMENTS.md file contains:
 - Timing constants (QR TTL, challenge TTL, proof age limit)
 
 For deep detail on any requirement, refer to `docs/SRS.md` (full 200-page SRS).
+
+**UI work:** read `docs/DESIGN.md` before touching any screen (web, mobile or extension).
+**Demo work:** the current goal and phase order is in `docs/DEMO_BUILD.md`; current state is in `docs/STATUS.md`.
 
 ---
 
@@ -84,11 +90,11 @@ npx tsc --noEmit
 
 # Tests
 npm test --workspace=services/backend
-node scripts/verify-flow.mjs              # end-to-end lifecycle check (stack must be up); sd-jwt has no unit tests
+npm test --workspace=packages/sd-jwt
 
 # Prisma (ALWAYS use --schema flag)
 npx prisma generate --schema=services/backend/prisma/schema.prisma
-npx prisma migrate status --schema=services/backend/prisma/schema.prisma   # run from services/backend if DATABASE_URL isn't found (see Prisma notes)
+npx prisma migrate status --schema=services/backend/prisma/schema.prisma
 npx prisma migrate dev --schema=services/backend/prisma/schema.prisma --name <migration_name>
 npx prisma studio --schema=services/backend/prisma/schema.prisma
 
@@ -113,25 +119,22 @@ docker compose -f infra/docker-compose.yml ps
 - Schema is at `services/backend/prisma/schema.prisma` — NOT at repo root
 - Every prisma CLI command MUST include `--schema=services/backend/prisma/schema.prisma`
 - Running without `--schema` will silently use a wrong path
-- `DATABASE_URL` is only found when the CLI runs from `services/backend` — from the repo root it fails with P1012. Use:
-  `cd services/backend && npx prisma migrate status --schema=prisma/schema.prisma`
 
 ### SD-JWT Package
 - Three named exports: `@nexusid/sd-jwt/issuer`, `@nexusid/sd-jwt/holder`, `@nexusid/sd-jwt/verifier`
 - Uses SHA-256 digests and RSA-2048 signatures (CON-007, CON-008)
 - Proof generation (ALG-001) MUST happen on device — private key never leaves Android Keystore
-- `createCredential` takes `holderPublicKey` (SPKI PEM) and writes it as `cnf.jwk`; credentials carry NO `sub` — never put an identifier (CNIC, reg. no.) in always-visible claims
-- `verifyProof` enforces holder binding (`cnf.jwk` = submitting user's key), proof age ≤ 60 s, and (via `expectedFields`) exact match with the requested fields
-- The backend and issuers import `packages/sd-jwt/dist` — run `npm run build --workspace=packages/sd-jwt` after editing `src/`
 
 ### Issuer Services
 - Each issuer exposes `GET /.well-known/jwks.json` for public key
-- `POST /api/v1/credentials/{type}/reverify` (API-011, account recovery) is in the SRS but NOT implemented on any issuer yet
+- Each issuer exposes `POST /api/v1/credentials/{type}/reverify` for account recovery
 - NADRA uses 2-step: `POST /verify` → OTP → `POST /verify-otp`
 - AU issuer rate-limited: 5 requests/minute per IP
 
 ### Next.js / Web Portal
 - App Router (Next.js 14) — no Pages Router
+- Tailwind **3.4** → shadcn/ui via **`npx shadcn@2.3.0`** only (latest CLI targets Tailwind v4)
+- Do NOT upgrade Tailwind, Next.js or React before the demo
 - Zod v4 is installed; `zodResolver` from `@hookform/resolvers/zod` requires Zod v3 API — use `z.object()` not `z.strictObject()` if resolver errors appear
 - Auth flow: NextAuth session cookie → API proxy routes (`/api/auth?action=login`)
 
@@ -178,17 +181,8 @@ docker compose -f infra/docker-compose.yml ps
 
 ---
 
-## FYP Evaluation Target (60% — 2 weeks)
+## FYP Evaluation Target (65–70% demo)
 
-**Must work for demo:**
-- [ ] Mobile: Registration + device key + pairing QR (FR-001–FR-003)
-- [ ] Mobile: Credential wallet + at least 1 issuer (FR-006–FR-010)
-- [ ] Mobile: Full verification flow — notification → approve → proof → result (FR-019–FR-027)
-- [ ] Extension: QR pairing + request detection + result display (FR-031–FR-034)
-- [ ] Portal: SP registration + API key + verification session creation (FR-039–FR-043, FR-045)
-- [ ] Backend: All verification endpoints working end-to-end
-
-**Nice to have:**
-- History (FR-028–FR-030)
-- Account recovery (FR-037)
-- ML service wired to issuers (services/ml)
+Follow `docs/DEMO_BUILD.md` §4 in order: Phase 0 audit → 1 backend loop → 2a shadcn → 2b shared components
+→ 3 SP portal → 4 Shop A → 5 extension → 6 mobile → 7 End User portal → 8 polish.
+The demo story (12 steps) is in `docs/DEMO_BUILD.md` §1. Keep `docs/STATUS.md` updated after each phase.

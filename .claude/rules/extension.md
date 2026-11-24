@@ -9,6 +9,11 @@ paths:
 - Chrome MV3 (Manifest V3) — Google Chrome only (out of scope: other browsers)
 - TypeScript + Webpack or Vite for bundling
 
+## Design
+- Popup is 360 × 560, dark tokens from `docs/DESIGN.md` §3, states and layout from §6.3
+- QR / outcome / predicate visuals match DESIGN.md §5 (same as the web portal)
+- Predicate labels from the shared map in `packages/types`
+
 ## Extension Architecture (MOD-7)
 
 ### Components

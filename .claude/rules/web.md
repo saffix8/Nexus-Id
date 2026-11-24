@@ -7,8 +7,19 @@ paths:
 
 ## Framework
 - Next.js 14 App Router (NO Pages Router)
-- TypeScript + Tailwind CSS
+- TypeScript + **Tailwind 3.4** + **shadcn/ui** (install/add only with `npx shadcn@2.3.0`, never `@latest`)
+- Icons: lucide-react · Animation: `motion` (`motion/react`) · Toasts: sonner · Charts: shadcn chart (recharts) · QR: qrcode.react
 - Route handlers in `app/api/` for server-side proxy
+- Do NOT upgrade Tailwind, Next.js or React
+
+## Design
+- Read `docs/DESIGN.md` before building or changing any screen. Dark only. Tokens §3, signature components §5, screens §6.1, states §7, copy §8
+- `components/ui/` = shadcn components (generated, edit sparingly). NexusID components (OutcomeBadge, PredicateChip, CodeBlock,
+  QRPanel, CredentialCard, LiveLogTable, AppShell) live in `components/nexus/`
+- Predicate labels come from the shared map in `packages/types`, never hard-coded
+- Accent `#3B6FE8` is for fills only; small accent text uses `accent-text` (#7BA0FF)
+- Status is never colour alone: icon + label + colour (§3.2)
+- No hydration mismatches: no `Date.now()`, `Math.random()` or locale date formatting during server render
 
 ## Zod Compatibility Warning
 - Zod v4 is installed in this project

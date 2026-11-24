@@ -17,6 +17,13 @@ paths:
 - Uploaded national identity information stored ONLY on-device encrypted, NEVER sent to backend (BR-011)
 - Proof generation (ALG-001) happens ON DEVICE — raw claim values never transmitted
 
+## Design
+- Read `docs/DESIGN.md` §3, §5 and §6.2 before any UI change. Tokens in `src/styles/tokens.ts`
+- Icons: lucide-react-native · Animation: react-native-reanimated · Sheets: @gorhom/bottom-sheet
+- Do not add NativeWind before the demo unless it is already installed (see DESIGN.md §6.2)
+- Predicate labels from the shared map in `packages/types`
+- UI changes must never touch key generation, signing or credential storage logic
+
 ## Key Libraries
 - `react-native-biometrics` → Android Keystore key generation + signing
 - `react-native-sqlite-storage` → encrypted local SQLite for credentials

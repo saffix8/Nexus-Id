@@ -120,9 +120,9 @@ beforeAll(async () => {
   // Seed: issuer registry
   const issuerRow = await prisma.issuerRegistry.create({
     data: {
-      issuerId: "hec.gov.pk",
-      name: "Higher Education Commission Pakistan",
-      jwksUrl: "http://localhost:4002/.well-known/jwks.json",
+      issuerId: "nadra.gov.pk",
+      name: "NADRA Pakistan",
+      jwksUrl: "http://localhost:4001/.well-known/jwks.json",
       publicKey: issuerKeys.publicKey,
       active: true,
     },
@@ -136,6 +136,7 @@ beforeAll(async () => {
       displayName: "NexusID Test Verifier",
       apiKey: hashApiKey(TEST_API_KEY),
       trusted: true,
+      requiredPredicates: ["AGE_OVER_18", "AGE_OVER_21", "NATIONALITY_PAKISTANI"],
     },
   });
   testVerifierId = verifierRow.id;
@@ -157,13 +158,13 @@ const DEFAULT_PAGE_URL = "https://test-company.nexusid.com/apply";
 
 /** API-030: the Service Provider's server opens a session (backend makes the nonce). */
 async function openSession(
-  requestedFields: string[],
+  predicate: string,
   extra: { callbackUrl?: string } = {},
 ): Promise<{ sessionId: string; nonce: string; expiresAt: string }> {
   const res = await request(app)
     .post("/api/v1/verification/sessions")
     .set("x-api-key", TEST_API_KEY)
-    .send({ requestedFields, ...extra })
+    .send({ predicate, ...extra })
     .expect(201);
   return res.body.data;
 }
@@ -178,10 +179,10 @@ function relay(sessionId: string, nonce: string, pageUrl = DEFAULT_PAGE_URL) {
 
 /** API-030 then API-032: a request routed to the paired test user. */
 async function openRelayedRequest(
-  requestedFields: string[],
+  predicate: string,
   pageUrl = DEFAULT_PAGE_URL,
 ): Promise<{ requestId: string; nonce: string; pollSecret: string }> {
-  const session = await openSession(requestedFields);
+  const session = await openSession(predicate);
   const res = await relay(session.sessionId, session.nonce, pageUrl).expect(200);
   return {
     requestId: res.body.data.requestId,
@@ -341,7 +342,7 @@ describe("Test 1b — Device pairing", () => {
   });
 
   it("refuses an unpaired browser's relay — 409", async () => {
-    const session = await openSession(["degree_title"]);
+    const session = await openSession("AGE_OVER_18");
     const res = await relay(session.sessionId, session.nonce).expect(409);
     expect(res.body.error).toMatch(/not paired/i);
   });
@@ -481,7 +482,7 @@ describe("Test 2 — Verification session and relay", () => {
   it("requires the Service Provider's API key to open a session — 401", async () => {
     await request(app)
       .post("/api/v1/verification/sessions")
-      .send({ requestedFields: ["degree_title"] })
+      .send({ predicate: "AGE_OVER_18" })
       .expect(401);
   });
 
@@ -490,7 +491,7 @@ describe("Test 2 — Verification session and relay", () => {
       .post("/api/v1/verification/sessions")
       .set("x-api-key", TEST_API_KEY)
       .send({
-        requestedFields: ["degree_title", "university"],
+        predicate: "AGE_OVER_18",
         callbackUrl: "https://test-company.nexusid.com/verify/callback",
       })
       .expect("Content-Type", /json/)
@@ -514,7 +515,7 @@ describe("Test 2 — Verification session and relay", () => {
   });
 
   it("gives every session a different nonce (FR-043 AC4)", async () => {
-    const other = await openSession(["degree_title"]);
+    const other = await openSession("AGE_OVER_18");
     expect(other.nonce).not.toBe(testNonce);
   });
 
@@ -535,7 +536,8 @@ describe("Test 2 — Verification session and relay", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.requestId).toBe(sessionId);
     expect(res.body.data.verifierName).toBe("NexusID Test Verifier");
-    expect(res.body.data.requestedFields).toEqual(["degree_title", "university"]);
+    expect(res.body.data.predicate).toBe("AGE_OVER_18");
+    expect(res.body.data.requestedFields).toEqual(["AGE_OVER_18"]);
     expect(typeof res.body.data.pollSecret).toBe("string");
 
     verificationRequestId = res.body.data.requestId;
@@ -555,7 +557,7 @@ describe("Test 2 — Verification session and relay", () => {
     expect(dbReq!.pageUrl).toBe(DEFAULT_PAGE_URL);
     expect(dbReq!.pollSecretHash).toBeTruthy();
     expect(dbReq!.pollSecretHash).not.toBe(verificationPollSecret);
-    expect(dbReq!.requestedFields).toEqual(["degree_title", "university"]);
+    expect(dbReq!.predicate).toBe("AGE_OVER_18");
   });
 
   it("notified the paired device once (FR-019)", () => {
@@ -578,7 +580,7 @@ describe("Test 2 — Verification session and relay", () => {
   });
 
   it("refuses to relay an expired session — 410 (FR-024)", async () => {
-    const stale = await openSession(["degree_title"]);
+    const stale = await openSession("AGE_OVER_18");
     await prisma.verificationRequest.update({
       where: { id: stale.sessionId },
       data: { expiresAt: new Date(Date.now() - 1000) },
@@ -599,7 +601,7 @@ describe("Test 3 — Valid proof submission", () => {
   it("accepts a valid SD-JWT proof and marks the request as completed", async () => {
     // Generate a REAL proof using holder pipeline + user private key
     const proof = await generateTestProof(testCredential, userKeys.privateKey, {
-      requestedFields: ["degree_title", "university"],
+      requestedFields: ["AGE_OVER_18"],
       verifierId: testVerifierId,
       nonce: testNonce,
     });
@@ -616,10 +618,9 @@ describe("Test 3 — Valid proof submission", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe("verified");
-    expect(res.body.data.verifiedFields).toMatchObject({
-      degree_title: "BS Computer Science",
-      university: "Air University Islamabad",
-    });
+    expect(res.body.data.outcome).toBe("VERIFIED");
+    expect(res.body.data.predicate).toBe("AGE_OVER_18");
+    expect(res.body.data).not.toHaveProperty("verifiedFields");
 
     // Confirmed in DB
     const dbReq = await prisma.verificationRequest.findUnique({
@@ -631,7 +632,9 @@ describe("Test 3 — Valid proof submission", () => {
       where: { requestId: verificationRequestId },
     });
     expect(dbResult).not.toBeNull();
-    expect(dbResult!.issuer).toBe("hec.gov.pk");
+    expect(dbResult!.issuer).toBe("nadra.gov.pk");
+    expect(dbResult!.outcome).toBe("VERIFIED");
+    expect(dbResult!.condition).toBe("AGE_OVER_18");
     expect(dbResult!.proofHash).toBeTruthy();
   });
 });
@@ -647,10 +650,9 @@ describe("Test 4 — Reading the outcome", () => {
       .expect(200);
 
     expect(res.body.data.status).toBe("completed");
-    expect(res.body.data.verifiedFields).toMatchObject({
-      degree_title: "BS Computer Science",
-      university: "Air University Islamabad",
-    });
+    expect(res.body.data.outcome).toBe("VERIFIED");
+    expect(res.body.data.predicate).toBe("AGE_OVER_18");
+    expect(res.body.data).not.toHaveProperty("verifiedFields");
     expect(res.body.data.callbackUrl).toBe(
       "https://test-company.nexusid.com/verify/callback",
     );
@@ -663,9 +665,8 @@ describe("Test 4 — Reading the outcome", () => {
       .expect(200);
 
     expect(res.body.data.status).toBe("completed");
-    expect(res.body.data.verifiedFields).toMatchObject({
-      degree_title: "BS Computer Science",
-    });
+    expect(res.body.data.outcome).toBe("VERIFIED");
+    expect(res.body.data.issuer).toBe("nadra.gov.pk");
   });
 
   it("requires the poll secret — 401", async () => {
@@ -706,7 +707,7 @@ describe("Test 5 — Replay attack rejected", () => {
   beforeAll(async () => {
     // Create a fresh request for the replay scenario
     const relayed = await openRelayedRequest(
-      ["degree_title"],
+      "AGE_OVER_18",
       "https://test-company.nexusid.com/replay-test",
     );
     replayRequestId = relayed.requestId;
@@ -714,7 +715,7 @@ describe("Test 5 — Replay attack rejected", () => {
 
     // Build the proof once
     replayProof = await generateTestProof(testCredential, userKeys.privateKey, {
-      requestedFields: ["degree_title"],
+      requestedFields: ["AGE_OVER_18"],
       verifierId: testVerifierId,
       nonce: replayNonce,
     });
@@ -759,9 +760,10 @@ describe("Test 6 — Tampered proof rejected", () => {
   let tamperedRequestId: string;
   let tamperedNonce: string;
 
-  beforeAll(async () => {
+  // A fresh session per attempt: one proof closes a session (single-use nonce).
+  beforeEach(async () => {
     const relayed = await openRelayedRequest(
-      ["degree_title", "university"],
+      "AGE_OVER_18",
       "https://test-company.nexusid.com/tamper-test",
     );
     tamperedRequestId = relayed.requestId;
@@ -773,7 +775,7 @@ describe("Test 6 — Tampered proof rejected", () => {
       testCredential,
       userKeys.privateKey,
       {
-        requestedFields: ["degree_title", "university"],
+        requestedFields: ["AGE_OVER_18"],
         verifierId: testVerifierId,
         nonce: tamperedNonce,
       },
@@ -816,7 +818,7 @@ describe("Test 6 — Tampered proof rejected", () => {
       testCredential,
       userKeys.privateKey,
       {
-        requestedFields: ["degree_title"],
+        requestedFields: ["AGE_OVER_18"],
         verifierId: testVerifierId,
         nonce: tamperedNonce,
       },
@@ -826,8 +828,8 @@ describe("Test 6 — Tampered proof rejected", () => {
     const fakeDisclosure = Buffer.from(
       JSON.stringify([
         "fake-salt-000000000000",
-        "degree_title",
-        "FORGED DEGREE",
+        "AGE_OVER_18",
+        true,
       ]),
     ).toString("base64url");
 
@@ -854,7 +856,7 @@ describe("Test 6 — Tampered proof rejected", () => {
       testCredential,
       userKeys.privateKey,
       {
-        requestedFields: ["degree_title", "university"],
+        requestedFields: ["AGE_OVER_18"],
         verifierId: testVerifierId,
         nonce: tamperedNonce,
       },
@@ -909,7 +911,8 @@ describe("Test 7 — Expired request rejected", () => {
     const row = await prisma.verificationRequest.create({
       data: {
         verifierId: testVerifierId,
-        requestedFields: ["degree_title"],
+        predicate: "AGE_OVER_18",
+        requestedFields: ["AGE_OVER_18"],
         nonce: expiredNonce,
         pageUrl: "https://test-company.nexusid.com/expired-test",
         // Already relayed to the test user before it ran out.
@@ -936,7 +939,7 @@ describe("Test 7 — Expired request rejected", () => {
 
   it("rejects proof submission against an expired request with 400", async () => {
     const proof = await generateTestProof(testCredential, userKeys.privateKey, {
-      requestedFields: ["degree_title"],
+      requestedFields: ["AGE_OVER_18"],
       verifierId: testVerifierId,
       nonce: expiredNonce,
     });
@@ -968,7 +971,7 @@ describe("Test 8 — User rejects a verification request", () => {
 
   beforeAll(async () => {
     const relayed = await openRelayedRequest(
-      ["degree_title"],
+      "AGE_OVER_18",
       "https://test-company.nexusid.com/reject-test",
     );
     rejectableRequestId = relayed.requestId;
@@ -1000,7 +1003,7 @@ describe("Test 8 — User rejects a verification request", () => {
       .then((r: { nonce: string } | null) => r!.nonce);
 
     const proof = await generateTestProof(testCredential, userKeys.privateKey, {
-      requestedFields: ["degree_title"],
+      requestedFields: ["AGE_OVER_18"],
       verifierId: testVerifierId,
       nonce,
     });
@@ -1052,7 +1055,8 @@ describe("Test 10 — Verification history", () => {
     expect(completed).toBeDefined();
     expect(completed.status).toBe("completed");
     expect(completed.verifierName).toBe("NexusID Test Verifier");
-    expect(completed.requestedFields).toEqual(["degree_title", "university"]);
+    expect(completed.predicate).toBe("AGE_OVER_18");
+    expect(completed.outcome).toBe("VERIFIED");
     expect(typeof completed.decidedAt).toBe("string");
   });
 
@@ -1068,7 +1072,7 @@ describe("Test 11 — Service Provider API key", () => {
     await request(app)
       .post("/api/v1/verification/sessions")
       .set("x-api-key", "not-a-real-key")
-      .send({ requestedFields: ["degree_title"] })
+      .send({ predicate: "AGE_OVER_18" })
       .expect(401);
   });
 
@@ -1078,7 +1082,7 @@ describe("Test 11 — Service Provider API key", () => {
       .set("x-api-key", TEST_API_KEY)
       .send({
         verifierId: "00000000-0000-0000-0000-000000000000",
-        requestedFields: ["degree_title"],
+        predicate: "AGE_OVER_18",
       })
       .expect(201);
 
@@ -1141,7 +1145,8 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .expect(200);
     otherToken = login.body.data.token;
 
-    requestId = (await openRelayedRequest(["degree_title"])).requestId;
+    requestId = (await openRelayedRequest(
+      "AGE_OVER_18")).requestId;
   });
 
   it("lists the request as pending for the paired user only", async () => {
@@ -1155,7 +1160,8 @@ describe("Test 12 — Requests belong to the paired user", () => {
     expect(entry).toMatchObject({
       verifierId: testVerifierId,
       verifierName: "NexusID Test Verifier",
-      requestedFields: ["degree_title"],
+      predicate: "AGE_OVER_18",
+      predicateLabel: "Age over 18",
     });
     expect(typeof entry.nonce).toBe("string");
 
@@ -1208,9 +1214,9 @@ describe("Test 12 — Requests belong to the paired user", () => {
         userId: testUserId,
         issuerCredentialId: testCredential.id,
         credentialJti: jti,
-        issuerDid: "hec.gov.pk",
-        issuerName: "HEC",
-        credentialType: "degree",
+        issuerDid: "nadra.gov.pk",
+        issuerName: "NADRA",
+        credentialType: "identity",
         status: "revoked",
         metadata: {},
         issuedAt: new Date(),
@@ -1223,7 +1229,7 @@ describe("Test 12 — Requests belong to the paired user", () => {
       where: { id: requestId },
     });
     const proof = await generateTestProof(testCredential, userKeys.privateKey, {
-      requestedFields: ["degree_title"],
+      requestedFields: ["AGE_OVER_18"],
       verifierId: testVerifierId,
       nonce: dbReq!.nonce,
     });
@@ -1238,7 +1244,8 @@ describe("Test 12 — Requests belong to the paired user", () => {
     const after = await prisma.verificationRequest.findUnique({
       where: { id: requestId },
     });
-    expect(after!.status).toBe("pending"); // nothing was disclosed
+    // The nonce was consumed on receipt, so the session closes as FAILED.
+    expect(after!.status).toBe("failed");
 
     await prisma.credential.deleteMany({ where: { credentialJti: jti } });
   });
@@ -1261,7 +1268,7 @@ describe("Test 12 — Requests belong to the paired user", () => {
       .set("Authorization", `Bearer ${authToken}`)
       .expect(200);
 
-    const session = await openSession(["degree_title"]);
+    const session = await openSession("AGE_OVER_18");
     await relay(session.sessionId, session.nonce).expect(409);
   });
 });

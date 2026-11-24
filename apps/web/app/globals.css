@@ -2,33 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Design System v2 — docs/DESIGN.md §4.2. Dark only: no light theme, no .dark block.
+   Fonts are loaded with next/font/google in app/layout.tsx (no CSS @import). */
 
-:root {
-  --color-bg-base:        #0C0E13;
-  --color-bg-elevated:    #13161E;
-  --color-bg-inset:       #0A0C10;
-  --color-bg-overlay:     #1A1E28;
+@layer base {
+  :root {
+    --background: 225 22% 6%; /* #0C0E13 */
+    --foreground: 228 33% 95%; /* #EEF0F6 */
+    --card: 224 22% 10%; /* #13161E */
+    --card-foreground: 228 33% 95%;
+    --popover: 224 22% 10%;
+    --popover-foreground: 228 33% 95%;
+    --primary: 222 79% 57%; /* #3B6FE8 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 223 21% 13%; /* #1A1E28 */
+    --secondary-foreground: 228 33% 95%;
+    --muted: 223 21% 13%;
+    --muted-foreground: 228 13% 60%; /* #8B92A8 */
+    --accent: 223 21% 13%; /* shadcn "accent" = hover surface, NOT brand */
+    --accent-foreground: 228 33% 95%;
+    --destructive: 0 84% 60%; /* #EF4444 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 223 24% 19%; /* #252C3D */
+    --input: 223 24% 19%;
+    --ring: 222 79% 57%;
+    --radius: 0.5rem;
+    --chart-1: 222 79% 57%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 0 84% 60%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 228 13% 60%;
 
-  --color-border-subtle:  #1E2330;
-  --color-border-default: #252C3D;
-  --color-border-strong:  #3A4560;
+    /* shadcn sidebar — not in §4.2; derived from the same tokens */
+    --sidebar-background: 224 22% 10%;   /* surface #13161E */
+    --sidebar-foreground: 228 33% 95%;
+    --sidebar-primary: 222 79% 57%;      /* accent fill for active nav */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 223 21% 13%;       /* overlay #1A1E28 (hover) */
+    --sidebar-accent-foreground: 228 33% 95%;
+    --sidebar-border: 223 24% 19%;
+    --sidebar-ring: 222 79% 57%;
 
-  --color-text-primary:   #EEF0F6;
-  --color-text-secondary: #8B92A8;
-  --color-text-tertiary:  #525A72;
+    /* Legacy v1 variable still read by components/legacy-ui/StatCard.tsx */
+    --color-bg-overlay: #1a1e28;
 
-  --color-accent-primary:   #3B6FE8;
-  --color-accent-secondary: #5B4FE8;
-}
+    color-scheme: dark;
+  }
 
-* {
-  border-color: var(--color-border-subtle);
-}
+  * {
+    @apply border-border;
+  }
 
-html,
-body {
-  background-color: var(--color-bg-base);
-  color: var(--color-text-primary);
-  font-family: 'Inter', sans-serif;
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
 }

@@ -23,11 +23,13 @@ const router = Router();
 
 // API-030: the verifier is identified by its API key (see requireApiKey),
 // never by a field in the body. The backend generates the nonce (FR-043).
+// One catalog predicate per session (FR-005, BR-021); catalog membership and
+// the provider's configuration are checked in the service.
 const CreateSessionSchema = z.object({
-  requestedFields: z
-    .array(z.string().min(1))
-    .min(1, "At least one field must be requested")
-    .max(20, "Too many requested fields"),
+  predicate: z
+    .string({ error: "predicate is required (a predicate catalog code such as AGE_OVER_18)" })
+    .min(1, "predicate is required")
+    .max(64),
   callbackUrl: z.string().url("callbackUrl must be a valid URL").optional(),
 });
 
@@ -77,7 +79,9 @@ const HistoryQuerySchema = z.object({
 
 function handleServiceError(err: unknown, res: Response): void {
   if (err instanceof VerificationError) {
-    res.status(err.statusCode).json(failure(err.message));
+    res
+      .status(err.statusCode)
+      .json(failure(err.message, err.statusCode, { code: err.code, ...err.details }));
     return;
   }
   // Re-throw unknown errors to the global error middleware
@@ -106,6 +110,7 @@ router.post(
       const result = await verificationService.createSession({
         ...parsed.data,
         verifierId: req.verifier!.id,
+        configuredPredicates: req.verifier!.requiredPredicates,
       });
       res.status(201).json(success(result));
     } catch (err) {
@@ -220,9 +225,9 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/verification/submit-proof
-// Called by the mobile app after the user approves a verification request.
-// Requires a valid user JWT (issued at login via POST /auth/login).
+// POST /api/v1/verification/submit-proof — API-035 (FR-044, ALG-002)
+// Called by the device after the End User approves. Device JWT. Runs ALG-002;
+// the session closes as VERIFIED or FAILED either way (single-use nonce).
 // ---------------------------------------------------------------------------
 
 router.post(
@@ -265,19 +270,19 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/verification/reject/:id
-// Called by the mobile app when the user taps "Reject".
+// POST /api/v1/verification/reject/:id — API-036 (FR-023): the End User declines.
+// POST /api/v1/verification/fail/:id   — API-037 (FR-025): no valid credential
+// carries the requested predicate.
 // ---------------------------------------------------------------------------
 
-router.post(
-  "/reject/:id",
-  verifyJWT,
-  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+function answerRoute(
+  action: (id: string, userId: string) => Promise<unknown>,
+) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { id } = req.params;
-
-      if (!id || typeof id !== "string") {
-        res.status(400).json(failure("Request ID is required"));
+      const id = req.params.id;
+      if (!UuidSchema.safeParse(id).success) {
+        res.status(422).json(failure("Invalid verification request ID"));
         return;
       }
 
@@ -287,8 +292,7 @@ router.post(
         return;
       }
 
-      const result = await verificationService.rejectRequest(id, user_id);
-      res.status(200).json(success(result));
+      res.status(200).json(success(await action(id as string, user_id)));
     } catch (err) {
       if (err instanceof VerificationError) {
         handleServiceError(err, res);
@@ -296,7 +300,19 @@ router.post(
         next(err);
       }
     }
-  },
+  };
+}
+
+router.post(
+  "/reject/:id",
+  verifyJWT,
+  answerRoute((id, userId) => verificationService.rejectRequest(id, userId)),
+);
+
+router.post(
+  "/fail/:id",
+  verifyJWT,
+  answerRoute((id, userId) => verificationService.failRequest(id, userId)),
 );
 
 // ---------------------------------------------------------------------------

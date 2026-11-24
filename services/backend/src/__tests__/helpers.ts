@@ -45,6 +45,17 @@ export async function generateTestKeyPair(): Promise<TestKeyPair> {
 // Credential
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * A NADRA-style predicate credential (FR-005): each catalog predicate is a
+ * selectively disclosable boolean. AGE_OVER_21 is false on purpose so tests can
+ * cover a predicate the credential carries but does not satisfy.
+ */
+export const DEFAULT_PREDICATE_CLAIMS: RawClaim[] = [
+  { field: 'AGE_OVER_18', value: true },
+  { field: 'AGE_OVER_21', value: false },
+  { field: 'NATIONALITY_PAKISTANI', value: true },
+];
+
 export async function generateTestCredential(
   issuerPrivateKey: string,
   holderPublicKey: string,
@@ -52,50 +63,37 @@ export async function generateTestCredential(
     issuerDID: string;
     keyId: string;
     expiresInDays: number;
+    claims: RawClaim[];
   }> = {},
 ): Promise<SDJWTCredential> {
   const { createCredential } = await import('@nexusid/sd-jwt/issuer');
 
-  const selectiveClaims: RawClaim[] = [
-    { field: 'student_name', value: 'Ahmed Ali Khan' },
-    { field: 'degree_title', value: 'BS Computer Science' },
-    { field: 'university', value: 'Air University Islamabad' },
-    { field: 'registration_number', value: 'FA19-BCS-101' },
-    { field: 'year_of_award', value: 2024 },
-  ];
+  const selectiveClaims = overrides.claims ?? DEFAULT_PREDICATE_CLAIMS;
 
   const alwaysVisibleClaims: Record<string, unknown> = {
-    credential_type: 'education',
-    issuer_name: 'Higher Education Commission Pakistan',
-    verified: true,
+    credential_type: 'identity',
+    issuer_name: 'NADRA Pakistan',
   };
 
   const metadata: CredentialMetadata = {
-    always_visible_fields: [
-      'credential_type',
-      'issuer_name',
-      'verified',
-    ],
+    always_visible_fields: ['credential_type', 'issuer_name'],
     selectively_disclosable_fields: selectiveClaims.map(c => c.field),
     field_labels: {
-      student_name: 'Full Name',
-      degree_title: 'Degree',
-      university: 'University',
-      registration_number: 'Registration No.',
-      year_of_award: 'Year of Award',
+      AGE_OVER_18: 'Age over 18',
+      AGE_OVER_21: 'Age over 21',
+      NATIONALITY_PAKISTANI: 'Pakistani national',
       credential_type: 'Credential Type',
       issuer_name: 'Issued By',
-      verified: 'Verified',
     },
   };
 
   const credential = await createCredential({
     claims: selectiveClaims,
     alwaysVisibleClaims,
-    issuerDID: overrides.issuerDID ?? 'hec.gov.pk',
+    issuerDID: overrides.issuerDID ?? 'nadra.gov.pk',
     holderPublicKey,
     issuerPrivateKey,
-    keyId: overrides.keyId ?? 'hec-test-key-v1',
+    keyId: overrides.keyId ?? 'nadra-test-key-v1',
     expiresInDays: overrides.expiresInDays ?? 365,
   });
 
@@ -116,13 +114,15 @@ export async function generateTestProof(
     requestedFields?: string[];
     verifierId?: string;
     nonce?: string;
+    /** Override the key-binding `iat` (seconds since epoch) — for proof-age tests. */
+    iat?: number;
   } = {},
 ): Promise<Proof> {
   const { selectDisclosures } = await import('@nexusid/sd-jwt/holder');
   const { importPKCS8 } = await import('jose');
 
   const requestedFields =
-    options.requestedFields ?? ['degree_title', 'university'];
+    options.requestedFields ?? ['AGE_OVER_18'];
 
   const verifierId =
     options.verifierId ?? 'test-verifier.nexusid.com';
@@ -156,7 +156,7 @@ export async function generateTestProof(
     aud: verifierId,
     nonce,
     sd_hash,
-    iat: Math.floor(Date.now() / 1000),
+    iat: options.iat ?? Math.floor(Date.now() / 1000),
   })
     .setProtectedHeader({
       alg: 'RS256',

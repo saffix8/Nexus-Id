@@ -13,7 +13,11 @@ import { z } from "zod";
 import { requireVerifierJWT } from "../middleware/auth.middleware.js";
 import { ValidationError } from "../middleware/error.middleware.js";
 import { success } from "../lib/response.js";
-import { verifierAccountService } from "../services/verifier-account.service.js";
+import {
+  verifierAccountService,
+  getRequirements,
+  setRequirements,
+} from "../services/verifier-account.service.js";
 
 const router = Router();
 
@@ -31,6 +35,12 @@ const RegisterSchema = z.object({
 const LoginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
   password: z.string().min(1, "Password is required"),
+});
+
+const RequirementsSchema = z.object({
+  predicates: z
+    .array(z.string().min(1), { error: "predicates must be an array of predicate codes" })
+    .max(20),
 });
 
 const RangeSchema = z.object({
@@ -128,6 +138,35 @@ router.get(
             await verifierAccountService.listRequests(req.user!.sub, from, to),
           ),
         );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// GET /verifiers/requirements — API-045 (FR-041): configured predicates + catalog.
+router.get(
+  "/requirements",
+  requireVerifierJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      res.status(200).json(success(await getRequirements(req.user!.sub)));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// PUT /verifiers/requirements — API-046 (FR-041): catalog codes only (BR-021).
+router.put(
+  "/requirements",
+  requireVerifierJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { predicates } = parseOrThrow(RequirementsSchema, req.body);
+      res
+        .status(200)
+        .json(success(await setRequirements(req.user!.sub, predicates)));
     } catch (err) {
       next(err);
     }

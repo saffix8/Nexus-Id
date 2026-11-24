@@ -1,5 +1,6 @@
 import { createCredential } from "@nexusid/sd-jwt/issuer";
-import type { SDJWTCredential, RawClaim } from "@nexusid/types";
+import { buildPredicateClaims } from "@nexusid/sd-jwt/predicates";
+import type { SDJWTCredential } from "@nexusid/types";
 import type { HECDegreeData } from "./hec-client";
 import fs from "fs";
 import path from "path";
@@ -31,6 +32,18 @@ export class CredentialBuildError extends Error {
   }
 }
 
+/**
+ * True for a bachelor's degree or above (BS/BSc/BA/BE/BBA/LLB/MBBS…, masters,
+ * MPhil, PhD). Associate degrees, diplomas and intermediate certificates are not.
+ */
+export function isBachelorOrHigher(degreeTitle: string): boolean {
+  const t = degreeTitle.trim().toLowerCase();
+  if (/\b(associate|diploma|certificate|intermediate|matric|f\.?\s?sc|f\.?\s?a|a[\s-]?level|o[\s-]?level)\b/.test(t)) {
+    return false;
+  }
+  return /\b(bachelor|master|doctor|ph\.?\s?d|d\.?\s?phil|m\.?\s?phil|mbbs|bds|llb|llm|pharm\.?\s?d|b\.?\s?(s|sc|a|e|ba|cs|com|arch|pharm|ed|tech|eng)|m\.?\s?(s|sc|a|e|ba|cs|com|ed|tech|eng))\b/.test(t);
+}
+
 export async function buildCredential(
   hecData: HECDegreeData,
   userPublicKey: string,
@@ -45,26 +58,19 @@ export async function buildCredential(
     );
   }
 
-  // Always-visible claims — safe to expose in every presentation
-  const alwaysVisibleClaims: Record<string, unknown> = {
-    credential_type: "education",
-    issuer_name: "Higher Education Commission Pakistan",
-    verified: true,
-  };
-
-  // Selectively disclosable fields — holder chooses which to reveal
-  const selectiveFields: RawClaim[] = [
-    { field: "student_name", value: hecData.student_name },
-    { field: "degree_title", value: hecData.degree_title },
-    { field: "university", value: hecData.university },
-    { field: "registration_number", value: hecData.registration_number },
-    { field: "year_of_award", value: hecData.year_of_award },
-  ];
+  // FR-007 AC3 / BR-021: only the catalog predicate. Name, degree title,
+  // university and registration number never enter the credential.
+  const { claims, metadata } = buildPredicateClaims("hec.gov.pk", {
+    DEGREE_BACHELOR_OR_HIGHER: isBachelorOrHigher(hecData.degree_title),
+  });
 
   try {
     const credential = await createCredential({
-      claims: selectiveFields,
-      alwaysVisibleClaims,
+      claims,
+      alwaysVisibleClaims: {
+        credential_type: "education",
+        issuer_name: "Higher Education Commission Pakistan",
+      },
       issuerDID: "hec.gov.pk",
       holderPublicKey: userPublicKey,
       issuerPrivateKey: privateKey,
@@ -72,6 +78,7 @@ export async function buildCredential(
       expiresInDays: 365 * 5, // HEC degrees are valid for 5 years before re-verification
     });
 
+    credential.metadata = metadata;
     return credential;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

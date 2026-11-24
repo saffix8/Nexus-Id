@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import type { Message, MulticastMessage } from 'firebase-admin/messaging';
 import { getMessaging } from 'firebase-admin/messaging';
+import { predicateLabel } from '@nexusid/sd-jwt';
 import prisma from '../lib/prisma.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -130,7 +131,8 @@ class NotificationService {
 
       notification: {
         title: 'Verification Request',
-        body: `${verifier_name} wants to verify: ${requested_fields.join(', ')}`,
+        // Plain language only (NFR-005): the predicate's label, never a code or a value.
+        body: `${verifier_name} wants to confirm: ${requested_fields.map(predicateLabel).join(', ')}`,
       },
 
       // All data values must be strings for FCM

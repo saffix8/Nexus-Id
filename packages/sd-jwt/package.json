@@ -26,6 +26,11 @@
       "types": "./dist/verifier.d.ts",
       "import": "./dist/verifier.js",
       "default": "./dist/verifier.js"
+    },
+    "./predicates": {
+      "types": "./dist/predicates.d.ts",
+      "import": "./dist/predicates.js",
+      "default": "./dist/predicates.js"
     }
   },
   "scripts": {

@@ -2,7 +2,8 @@ import {
   createCredential,
   generateIssuerKeyPair,
 } from "@nexusid/sd-jwt/issuer";
-import type { SDJWTCredential, RawClaim } from "@nexusid/types";
+import { buildPredicateClaims } from "@nexusid/sd-jwt/predicates";
+import type { SDJWTCredential } from "@nexusid/types";
 import type { AUStudentData } from "./portal-scraper";
 import * as fs from "fs";
 import * as path from "path";
@@ -43,30 +44,24 @@ export async function buildCredential(
 ): Promise<SDJWTCredential> {
   const privateKey = loadIssuerPrivateKey();
 
-  const alwaysVisibleClaims: Record<string, unknown> = {
-    credential_type: "enrollment",
-    issuer_name: "Air University",
-    university: "Air University Islamabad",
-    verified: true,
-  };
-
-  const selectiveFields: RawClaim[] = [
-    { field: "name", value: auData.name },
-    { field: "registration_number", value: auData.registration_number },
-    { field: "program", value: auData.program },
-    { field: "department", value: auData.department },
-    { field: "cgpa", value: auData.cgpa },
-    {
-      field: "enrollment_status",
-      value: deriveEnrollmentStatus(auData.enrollment_status),
-    },
-    { field: "batch", value: auData.batch },
-    { field: "semester_count", value: auData.semester_count },
-  ];
+  // FR-007 AC3 / BR-021: only catalog predicates (FR-005 AC1 enrollment
+  // group). Name, registration number, program and the exact CGPA never
+  // enter the credential.
+  const cgpa = Number(auData.cgpa);
+  const hasCgpa = Number.isFinite(cgpa);
+  const { claims, metadata } = buildPredicateClaims("au.edu.pk", {
+    ENROLLED_CURRENT: deriveEnrollmentStatus(auData.enrollment_status) === "Active",
+    CGPA_AT_LEAST_2_0: hasCgpa && cgpa >= 2.0,
+    CGPA_AT_LEAST_3_0: hasCgpa && cgpa >= 3.0,
+    CGPA_AT_LEAST_3_5: hasCgpa && cgpa >= 3.5,
+  });
 
   const credential = await createCredential({
-    claims: selectiveFields,
-    alwaysVisibleClaims,
+    claims,
+    alwaysVisibleClaims: {
+      credential_type: "enrollment",
+      issuer_name: "Air University",
+    },
     issuerDID: "au.edu.pk",
     holderPublicKey: userPublicKey,
     issuerPrivateKey: privateKey,
@@ -74,33 +69,6 @@ export async function buildCredential(
     expiresInDays: 365,
   });
 
-  // Attach display metadata
-  const enriched: SDJWTCredential = {
-    ...credential,
-    metadata: {
-      always_visible_fields: [
-        "credential_type",
-        "issuer_name",
-        "university",
-        "verified",
-      ],
-      selectively_disclosable_fields: selectiveFields.map((c) => c.field),
-      field_labels: {
-        credential_type: "Credential Type",
-        issuer_name: "Issuer",
-        university: "University",
-        verified: "Verified",
-        name: "Full Name",
-        registration_number: "Registration Number",
-        program: "Program",
-        department: "Department",
-        cgpa: "CGPA",
-        enrollment_status: "Enrollment Status",
-        batch: "Batch",
-        semester_count: "Semesters Completed",
-      },
-    },
-  };
-
+  const enriched: SDJWTCredential = { ...credential, metadata };
   return enriched;
 }

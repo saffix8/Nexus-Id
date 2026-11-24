@@ -8,7 +8,7 @@
 // The API key stays on the provider's server; it never goes in a page.
 
 import { useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button } from "@/components/legacy-ui/Button";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";

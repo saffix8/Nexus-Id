@@ -1,5 +1,5 @@
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/legacy-ui/Badge';
+import { Button } from '@/components/legacy-ui/Button';
 import type { SDJWTCredential } from '@nexusid/types';
 import { formatDistanceToNow, isPast, differenceInDays } from 'date-fns';
 

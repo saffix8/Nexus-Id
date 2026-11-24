@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/legacy-ui/Button';
 
 interface EmptyStateProps {
   icon?: React.ReactNode;

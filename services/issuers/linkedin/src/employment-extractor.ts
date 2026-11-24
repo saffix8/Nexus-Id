@@ -1,5 +1,6 @@
-import type { SDJWTCredential, RawClaim } from "@nexusid/types";
+import type { SDJWTCredential } from "@nexusid/types";
 import { createCredential } from "@nexusid/sd-jwt/issuer";
+import { buildPredicateClaims } from "@nexusid/sd-jwt/predicates";
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { LinkedInProfile, LinkedInPosition } from "./oauth-client.js";
@@ -73,44 +74,29 @@ export async function buildCredential(
   positions: LinkedInPosition[],
   userPublicKey: string,
 ): Promise<SDJWTCredential> {
+  // FR-007 AC3 / BR-021: only the catalog predicate. Profile ID, name,
+  // email, employer and title never enter the credential.
   const currentPosition = getCurrentPosition(positions);
-  const totalExperienceYears = calculateTotalExperience(positions);
-  const fullName = `${profile.firstName} ${profile.lastName}`.trim();
-
-  const employmentStatus: string = currentPosition?.is_current
-    ? "Employed"
-    : positions.length > 0
-      ? "Previously Employed"
-      : "Not Employed";
-
-  const alwaysVisibleClaims: Record<string, unknown> = {
-    credential_type: "employment",
-    issuer_name: "LinkedIn",
-    verified: true,
-  };
-
-  const selectiveFields: RawClaim[] = [
-    { field: "profile_id", value: profile.id },
-    { field: "name", value: fullName },
-    { field: "email", value: profile.email },
-    { field: "current_company", value: currentPosition?.company ?? "" },
-    { field: "current_title", value: currentPosition?.title ?? "" },
-    { field: "employment_status", value: employmentStatus },
-    { field: "total_experience_years", value: totalExperienceYears },
-    { field: "position_count", value: positions.length },
-  ];
+  const { claims, metadata } = buildPredicateClaims("linkedin.com", {
+    EMPLOYMENT_ACTIVE: currentPosition?.is_current === true,
+  });
 
   const issuerPrivateKey = loadIssuerPrivateKey();
 
-  return createCredential({
-    claims: selectiveFields,
-    alwaysVisibleClaims,
+  const credential = await createCredential({
+    claims,
+    alwaysVisibleClaims: {
+      credential_type: "employment",
+      issuer_name: "LinkedIn",
+    },
     issuerDID: "linkedin.com",
     holderPublicKey: userPublicKey,
     issuerPrivateKey,
     keyId: "linkedin-issuer-key-v1",
     expiresInDays: 90, // LinkedIn data changes frequently; shorter TTL
   });
+
+  return { ...credential, metadata };
 }
 
 // ── Typed Error ───────────────────────────────────────────────────────────────

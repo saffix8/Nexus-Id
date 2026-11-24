@@ -12,7 +12,9 @@ import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
 import { Prisma } from "@prisma/client";
+import { isPredicateCode, PREDICATE_CATALOG, predicateLabel } from "@nexusid/sd-jwt";
 import prisma from "../lib/prisma.js";
+import { outcomeOf } from "./verification.service.js";
 import { VERIFIER_ROLE } from "../middleware/auth.middleware.js";
 import {
   AppError,
@@ -59,8 +61,13 @@ export interface IssuedApiKey {
 
 export interface VerifierRequestRow {
   id: string;
+  /** The condition asked for (FR-042 log: time, session ID, condition, outcome). */
+  predicate: string;
+  predicateLabel: string;
+  /** Legacy alias of [predicate]. */
   requestedFields: string[];
-  status: "pending" | "completed" | "rejected" | "expired";
+  status: "pending" | "completed" | "failed" | "rejected" | "expired";
+  outcome: ReturnType<typeof outcomeOf>;
   /** Seconds from request to the user's decision; null while undecided. */
   responseTimeSec: number | null;
   createdAt: string;
@@ -230,10 +237,14 @@ class VerifierAccountService {
         r.status === "pending" && r.expiresAt < now
           ? "expired"
           : (r.status as VerifierRequestRow["status"]);
+      const predicate = r.predicate ?? r.requestedFields[0] ?? "";
       return {
         id: r.id,
-        requestedFields: r.requestedFields,
+        predicate,
+        predicateLabel: predicateLabel(predicate),
+        requestedFields: [predicate],
         status,
+        outcome: outcomeOf(status),
         responseTimeSec: decidedAt
           ? Math.round((decidedAt.getTime() - r.createdAt.getTime()) / 100) / 10
           : null,
@@ -241,6 +252,52 @@ class VerifierAccountService {
       };
     });
   }
+}
+
+export interface VerifierRequirements {
+  /** Configured predicate codes (FR-041). */
+  predicates: string[];
+  /** The full catalog, for the requirements page (FR-005). */
+  catalog: { code: string; category: string; label: string; issuer: string }[];
+}
+
+function requirementsOf(predicates: string[]): VerifierRequirements {
+  return { predicates, catalog: Object.values(PREDICATE_CATALOG) };
+}
+
+/** API-045 — the provider's configured predicates. */
+export async function getRequirements(verifierId: string): Promise<VerifierRequirements> {
+  const v = await prisma.verifier.findUnique({
+    where: { id: verifierId },
+    select: { requiredPredicates: true },
+  });
+  if (!v) throw new NotFoundError("Service Provider");
+  return requirementsOf(v.requiredPredicates);
+}
+
+/** API-046 — replace the provider's configured predicates (FR-041, BR-021). */
+export async function setRequirements(
+  verifierId: string,
+  predicates: string[],
+): Promise<VerifierRequirements> {
+  const unknown = predicates.filter((p) => !isPredicateCode(p));
+  if (unknown.length > 0) {
+    throw new AppError(`Not in the predicate catalog: ${unknown.join(", ")}`, 400);
+  }
+  const unique = [...new Set(predicates)];
+  const v = await prisma.verifier.update({
+    where: { id: verifierId },
+    data: { requiredPredicates: unique },
+    select: { requiredPredicates: true },
+  });
+  await prisma.auditLog.create({
+    data: {
+      eventType: "verifier_requirements_updated",
+      verifierId,
+      metadata: { predicates: unique },
+    },
+  });
+  return requirementsOf(v.requiredPredicates);
 }
 
 export const verifierAccountService = new VerifierAccountService();

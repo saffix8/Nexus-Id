@@ -1,3 +1,104 @@
+# NexusID — Phase 2a: shadcn/ui install (2026-11-24)
+
+`apps/web` now has shadcn/ui (new-york, neutral, CSS variables) on Tailwind 3.4.19 / Next 14.2.35 / React 18.3.1 (none upgraded).
+`npx tsc --noEmit` and `npm run build` both pass with no warnings.
+
+- Hand-made components moved to `components/legacy-ui/` (Badge, Button, EmptyState, Input, Skeleton, StatCard); 3 imports updated.
+  `components/ui/` now holds only shadcn output.
+- Added with `shadcn@2.3.0`: button input label card badge table dialog alert-dialog sheet tabs checkbox dropdown-menu avatar
+  separator skeleton tooltip sonner **sidebar** (worked on 2.3.0) chart form progress scroll-area, plus `hooks/use-mobile.tsx`.
+- `globals.css`: DESIGN.md §4.2 dark mapping on `:root` only (no `.dark`, no light theme). Sidebar vars derived from the same tokens.
+- `tailwind.config.ts`: shadcn tokens + §3.1 colours (`surface overlay inset text.{muted,faint} accent.{primary,hover,text}
+  success warning danger cat.*`). Legacy v1 colours (`bg.*`, `border.{subtle,default,strong}`, `text.{primary,secondary,tertiary}`,
+  `cred.*`, `accent.secondary`) kept because existing pages use them.
+- Fonts: next/font (already in layout.tsx) now wired via `--font-inter / --font-dm-sans / --font-jetbrains`; CSS `@import` removed.
+- Removed the custom v1 `fontSize` scale (xs 10.2 px, sm 12.8 px) and the `rounded-xl: 16px` override so shadcn components get the
+  default scale (text-sm 14 px = DESIGN body size; rounded-xl 12 px = card radius). Existing pages render slightly larger text.
+- `sonner.tsx` pinned to `theme="dark"` (it used next-themes with no provider); `next-themes` uninstalled.
+- `themeColor` moved from `metadata` to `viewport` export (removed the Next 14 build warning).
+- Packages: lucide-react, motion, qrcode.react, date-fns, sonner, Radix primitives, tailwindcss-animate.
+- Not done yet: `react-hot-toast` and `@headlessui/react` still used by existing pages; remove once Phase 3 replaces them.
+
+---
+
+# NexusID — Phase 1: backend verification loop (2026-11-24)
+
+The backend loop now matches SRS v2, predicate-only. Backend Jest **98/98**
+(`verification-flow.test.ts` 65 adapted + new `verification-loop.test.ts` 33)
+against `nexusid_db_test`. Typecheck clean: backend, sd-jwt, types, web.
+
+## What changed
+
+- **Predicate catalog (FR-005, BR-021):** `packages/sd-jwt/src/predicates.ts`
+  (`@nexusid/sd-jwt` and `@nexusid/sd-jwt/predicates`): 9 codes, label, category,
+  issuing issuer. Issuance, configuration and verification share it.
+- **API-045/046** `GET/PUT /api/v1/verifiers/requirements` (portal JWT): catalog
+  codes only; stored in `verifiers.required_predicates`.
+- **API-030** takes `{ predicate }` (one catalog code). Unknown code → 422,
+  not configured for this SP → 403. `requestedFields: [predicate]` is still
+  returned as a legacy alias.
+- **API-035 / ALG-002:** the nonce is consumed on receipt (ALG-003, PK on
+  `used_nonces`), then: issuer in registry → issuer authorised for the
+  predicate → not revoked → signature, disclosures, KB-JWT (nonce, aud, age
+  ≤ 60 s), holder binding, credential `exp` → the only disclosed claim is the
+  predicate and it is `true`. Any failure closes the session as **FAILED**
+  (400 with `details.code`, e.g. `PREDICATE_MISMATCH`, `CREDENTIAL_EXPIRED`,
+  `NONCE_MISMATCH`, `PROOF_TOO_OLD`, `CONDITION_NOT_MET`).
+- **API-036** decline → DECLINED; **API-037** `POST /verification/fail/:id`
+  (new) → FAILED with no proof hash or issuer.
+- **ALG-005:** `verificationService.expireSessions()` (atomic `UPDATE …
+  RETURNING`) runs every 5 s from `bootstrap()`; lazy expiry kept as backup.
+- **Outcomes (API-031/033, history, SP log):** `{ status, outcome, predicate,
+  predicateLabel, issuer?, decidedAt? }`; `outcome` ∈ PENDING / VERIFIED /
+  FAILED / DECLINED / EXPIRED. **No claim values anywhere.**
+- **BR-015:** migration `20261124180000_predicate_outcomes` drops
+  `verification_results.verified_fields` (claim values already stored in the
+  dev DB were deleted with it) and adds `outcome`, `condition`; `issuer` and
+  `proof_hash` are nullable for API-037.
+- **`npm run seed:demo`** (`services/backend/src/db/seed-demo.ts`): the 4
+  issuers with keys from their live JWKS, and **Shop A** — API key
+  `nxk_shop_a_demo_key_2026`, portal `shop-a@nexusid.demo` / `ShopA-Demo-2026`,
+  `AGE_OVER_18` configured. Idempotent, deletes nothing.
+- `packages/types` tsconfig fixed (TS18003); `VerificationStatus` gains `failed`.
+
+## Issuers sign predicate claims (same day)
+
+All four issuers now issue **only** catalog predicates as selectively
+disclosable booleans, through `buildPredicateClaims()` in
+`@nexusid/sd-jwt/predicates`, which refuses non-catalog codes and codes owned by
+another issuer (BR-021). Always-visible claims are just `credential_type` and
+`issuer_name`. Name, CNIC, DOB, address, degree title, CGPA, employer and email
+never enter a credential.
+
+| Issuer | Predicates | Derived from |
+|---|---|---|
+| NADRA | AGE_OVER_18, AGE_OVER_21, NATIONALITY_PAKISTANI | DOB; verified CNIC record |
+| HEC | DEGREE_BACHELOR_OR_HIGHER | `isBachelorOrHigher(degree_title)` |
+| Air University | ENROLLED_CURRENT, CGPA_AT_LEAST_2_0/3_0/3_5 | enrollment status, CGPA |
+| LinkedIn | EMPLOYMENT_ACTIVE | current position |
+
+**Doc conflict resolved:** `.claude/rules/sd-jwt.md` gives CGPA to HEC, but
+FR-005 AC1 lists CGPA under enrollment and only the AU record has a CGPA, so
+CGPA moved to `au.edu.pk`. Fix the rules table if you agree.
+
+**Verified live (2026-11-24):** NADRA sandbox issued a credential → Shop A
+session `AGE_OVER_18` → relay → proof disclosing only `AGE_OVER_18=true` →
+VERIFIED on API-031 and API-033; replay → 400. HEC/AU/LinkedIn builders checked
+with throwaway keys. This added one test user + pairing to the dev DB.
+
+## Still to do in later phases
+
+- **Credentials already in web wallets are the old raw-field kind** and can't
+  satisfy a predicate. Re-add them (or clear the web vault) before the demo.
+- **Extension, demo/sp-server.mjs, verifier/create** still send
+  `requestedFields` / read `verifiedFields`. Sessions now need `{ predicate }`.
+  The web Requests page should work since `requestedFields` = `[predicate]`,
+  but it shows `true` as a "value". Fix that in Phase 7.
+- `scripts/verify-flow.mjs` still checks `verified_fields`; it needs updating.
+- Issuer Zod `.errors` → `.issues` bug (fix list #3) is not fixed yet.
+
+---
+
 # NexusID — Phase 0 Audit (2026-11-24, demo story in docs/DEMO_BUILD.md §1)
 
 Phase 0 of docs/DEMO_BUILD.md §4. Every later phase starts from this section.

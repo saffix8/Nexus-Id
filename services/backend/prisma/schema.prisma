@@ -70,6 +70,8 @@ model Verifier {
   email                String?               @unique
   passwordHash         String?               @map("password_hash")
   trusted              Boolean               @default(false)
+  /// Predicate codes this provider may request (FR-041, API-045/046). Catalog codes only (BR-021).
+  requiredPredicates   String[]              @default([]) @map("required_predicates")
   createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   verificationRequests VerificationRequest[]
 
@@ -81,10 +83,14 @@ model VerificationRequest {
   verifierId      String?             @map("verifier_id") @db.Uuid
   /// The End User this request was routed to, via the extension's pairing (FR-003).
   userId          String?             @map("user_id") @db.Uuid
+  /// Legacy: kept equal to [predicate] for older clients. `predicate` is authoritative.
   requestedFields String[]            @map("requested_fields")
+  /// The catalog predicate this session asks for (FR-043, BR-021).
+  predicate       String?
   nonce           String              @unique
   callbackUrl     String?             @map("callback_url")
   pageUrl         String?             @map("page_url")
+  /// pending | completed (VERIFIED) | failed (FAILED) | rejected (DECLINED) | expired (EXPIRED)
   status          String              @default("pending")
   expiresAt       DateTime            @map("expires_at") @db.Timestamptz(6)
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -108,12 +114,20 @@ model VerificationRequest {
   @@map("verification_requests")
 }
 
+/// BR-015: only the outcome, the condition name, the proof hash and the issuer.
+/// Never claim values.
 model VerificationResult {
   id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   requestId      String              @unique @map("request_id") @db.Uuid
-  verifiedFields Json                @map("verified_fields")
-  issuer         String
-  proofHash      String              @map("proof_hash")
+  /// VERIFIED | FAILED
+  outcome        String
+  /// Predicate code the session asked for.
+  condition      String
+  /// Issuer ID of the presented credential; null when no proof was presented (API-037).
+  issuer         String?
+  /// SHA-256 of the submitted proof; null when no proof was presented (API-037).
+  proofHash      String?             @map("proof_hash")
+  /// When the outcome was recorded.
   verifiedAt     DateTime            @map("verified_at") @db.Timestamptz(6)
   createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   request        VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)

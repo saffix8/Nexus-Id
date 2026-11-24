@@ -1,5 +1,6 @@
 import { createCredential } from "@nexusid/sd-jwt/issuer";
-import type { SDJWTCredential, RawClaim } from "@nexusid/types";
+import { buildPredicateClaims } from "@nexusid/sd-jwt/predicates";
+import type { SDJWTCredential } from "@nexusid/types";
 import type { NadraPersonData } from "./verisys-client";
 
 export class CredentialBuildError extends Error {
@@ -49,29 +50,23 @@ export async function buildCredential(
 
   const age = calculateAge(nadraData.date_of_birth);
 
-  const selectiveClaims: RawClaim[] = [
-    { field: "full_name", value: nadraData.full_name },
-    { field: "father_name", value: nadraData.father_name },
-    { field: "date_of_birth", value: nadraData.date_of_birth },
-    { field: "cnic", value: nadraData.cnic },
-    { field: "gender", value: nadraData.gender },
-    { field: "address", value: nadraData.address },
-    { field: "age", value: age },
-    { field: "age_over_18", value: age >= 18 },
-    { field: "age_over_21", value: age >= 21 },
-  ];
-
-  const alwaysVisibleClaims: Record<string, unknown> = {
-    credential_type: "identity",
-    issuer_name: "NADRA Pakistan",
-    verified: true,
-    issue_date: nadraData.issue_date,
-    expiry_date: nadraData.expiry_date,
-  };
+  // FR-007 AC3 / BR-021: the credential carries only catalog predicates,
+  // derived here from the NADRA record. Name, CNIC, date of birth, address
+  // and the exact age never enter the credential, so they can never be disclosed.
+  // NADRA issues a CNIC only to Pakistani citizens, so a verified CNIC record
+  // establishes nationality.
+  const { claims, metadata } = buildPredicateClaims("nadra.gov.pk", {
+    AGE_OVER_18: age >= 18,
+    AGE_OVER_21: age >= 21,
+    NATIONALITY_PAKISTANI: nadraData.verified === true,
+  });
 
   const credential = await createCredential({
-    claims: selectiveClaims,
-    alwaysVisibleClaims,
+    claims,
+    alwaysVisibleClaims: {
+      credential_type: "identity",
+      issuer_name: "NADRA Pakistan",
+    },
     issuerDID: "nadra.gov.pk",
     holderPublicKey: userPublicKey,
     issuerPrivateKey,
@@ -79,43 +74,7 @@ export async function buildCredential(
     expiresInDays: 365,
   });
 
-  // Attach field labels for UI display
-  credential.metadata = {
-    always_visible_fields: [
-      "credential_type",
-      "issuer_name",
-      "verified",
-      "issue_date",
-      "expiry_date",
-    ],
-    selectively_disclosable_fields: [
-      "full_name",
-      "father_name",
-      "date_of_birth",
-      "cnic",
-      "gender",
-      "address",
-      "age",
-      "age_over_18",
-      "age_over_21",
-    ],
-    field_labels: {
-      full_name: "Full Name",
-      father_name: "Father's Name",
-      date_of_birth: "Date of Birth",
-      cnic: "CNIC Number",
-      gender: "Gender",
-      address: "Address",
-      age: "Age",
-      age_over_18: "Age Over 18",
-      age_over_21: "Age Over 21",
-      credential_type: "Credential Type",
-      issuer_name: "Issuer",
-      verified: "Verified",
-      issue_date: "CNIC Issue Date",
-      expiry_date: "CNIC Expiry Date",
-    },
-  };
+  credential.metadata = metadata;
 
   return credential;
 }

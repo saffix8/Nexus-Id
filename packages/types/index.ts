@@ -67,7 +67,10 @@ export interface Proof {
 
 // ── VERIFICATION TYPES ───────────────────────────────────────
 
-export type VerificationStatus = 'pending' | 'completed' | 'rejected' | 'expired';
+export type VerificationStatus = 'pending' | 'completed' | 'failed' | 'rejected' | 'expired';
+
+/** SRS outcome names (FR-045): completed → VERIFIED, failed → FAILED, rejected → DECLINED, expired → EXPIRED. */
+export type VerificationOutcome = 'PENDING' | 'VERIFIED' | 'FAILED' | 'DECLINED' | 'EXPIRED';
 
 export interface VerificationRequest {
   id: string;

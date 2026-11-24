@@ -6,6 +6,7 @@ import morgan from "morgan";
 
 import { errorMiddleware } from "./middleware/error.middleware.js";
 import { notificationService } from "./services/notification.service.js";
+import { verificationService } from "./services/verification.service.js";
 
 // Route imports
 import authRouter from "./routes/auth.route.js";
@@ -94,6 +95,9 @@ export const app = createApp();
 async function bootstrap(): Promise<void> {
   try {
     notificationService.initialize();
+
+    // ALG-005: close PENDING sessions once their 120 s window has passed (FR-024).
+    verificationService.startExpirySweep();
 
     app.listen(PORT, () => {
       console.log(

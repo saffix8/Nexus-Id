@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageHeader } from "@/components/nexus/PageHeader";
 import {
   ApiKeyReveal,
   CodeBlock,
@@ -82,16 +83,11 @@ export default function ApiKeysPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="max-w-2xl space-y-1">
-        <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">
-          API keys
-        </h2>
-        <p className="text-sm text-text-muted">
-          Your server uses this key to open verification sessions and read
-          outcomes. Keep it on the server, never in a web page or app.
-        </p>
-      </div>
+    <div className="space-y-6 sm:space-y-8">
+      <PageHeader
+        title="API keys"
+        description="Your server uses this key to open verification sessions and read outcomes. Keep it on the server, never in a web page or app."
+      />
 
       {info.isError ? (
         <ErrorState
@@ -111,8 +107,8 @@ export default function ApiKeysPage() {
           }}
         />
       ) : (
-        <Card className="overflow-hidden shadow-none">
-          <div className="flex h-14 items-center justify-between border-b border-border-subtle px-5">
+        <Card className="overflow-hidden">
+          <div className="flex h-14 items-center justify-between gap-3 border-b border-border-subtle px-4 sm:px-5">
             <h3 className="font-display text-base font-semibold text-foreground">
               Secret key
             </h3>
@@ -134,10 +130,10 @@ export default function ApiKeysPage() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-5">Name</TableHead>
+                <TableHead className="pl-4 sm:pl-5">Name</TableHead>
                 <TableHead>Key</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="pr-5">Status</TableHead>
+                <TableHead className="hidden sm:table-cell">Created</TableHead>
+                <TableHead className="pr-4 text-right sm:pr-5 sm:text-left">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -149,7 +145,7 @@ export default function ApiKeysPage() {
                   <TableCell>
                     <Skeleton className="h-4 w-36" />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <Skeleton className="h-4 w-28" />
                   </TableCell>
                   <TableCell className="pr-5">
@@ -158,7 +154,7 @@ export default function ApiKeysPage() {
                 </TableRow>
               ) : (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell className="pl-5 font-medium text-foreground">
+                  <TableCell className="whitespace-nowrap pl-4 font-medium text-foreground sm:pl-5">
                     Live key
                   </TableCell>
                   <TableCell>
@@ -169,10 +165,10 @@ export default function ApiKeysPage() {
                       {maskedKey(info.data?.apiKeyPrefix)}
                     </code>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-text-muted">
+                  <TableCell className="num hidden whitespace-nowrap text-text-muted sm:table-cell">
                     {formatDate(info.data?.apiKeyRotatedAt)}
                   </TableCell>
-                  <TableCell className="pr-5">
+                  <TableCell className="pr-4 text-right sm:pr-5 sm:text-left">
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
                       <ShieldCheck
                         className="size-3.5"
@@ -186,14 +182,14 @@ export default function ApiKeysPage() {
               )}
             </TableBody>
           </Table>
-          <p className="border-t border-border-subtle px-5 py-3 text-xs text-text-muted">
+          <p className="border-t border-border-subtle px-4 py-3 text-xs text-text-muted sm:px-5">
             NexusID stores only a hash of this key, so it can&apos;t be shown
             again. Lost it? Rotate to get a new one.
           </p>
         </Card>
       )}
 
-      <Card className="space-y-3 p-5 shadow-none">
+      <Card className="space-y-3 p-4 sm:p-5">
         <h3 className="font-display text-base font-semibold text-foreground">
           Using the key
         </h3>

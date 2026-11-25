@@ -1,60 +1,69 @@
 // SCR-006 Profile (simplified for the demo): account, device key, paired browsers, sign out.
+// Grouped settings list — one row per action, not a stack of big buttons.
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Fingerprint, KeyRound, Lock, LogOut, ScanLine, UserRound } from 'lucide-react-native';
+import { ChevronRight, Fingerprint, KeyRound, Lock, LogOut, ScanLine, ShieldCheck, type LucideIcon } from 'lucide-react-native';
 import { API_BASE_URL } from '../config';
 import { truncateId } from '../lib/format';
 import { PRIVACY_LINE } from '../lib/copy';
 import type { RootStackParamList } from '../navigation/types';
-import { useTabBarHeight } from '../navigation/TabBar';
 import { useAuthStore } from '../store/auth.store';
 import { useSessionStore } from '../store/session.store';
-import { colors, icon, space } from '../styles/tokens';
-import { Button, Card, ConfirmDialog, Screen, StatusBadge, Text } from '../ui';
+import { alpha, colors, fonts, icon, radius, space } from '../styles/tokens';
+import { Card, ConfirmDialog, Screen, StatusBadge, Text } from '../ui';
+
+function initials(email: string | null | undefined) {
+  const name = (email ?? '').split('@')[0].replace(/[._-]+/g, ' ').trim();
+  const parts = name.split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? 'N') + (parts[1]?.[0] ?? '')).toUpperCase();
+}
 
 export function ProfileScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { email, userId, publicKey, logout } = useAuthStore();
   const [confirm, setConfirm] = useState(false);
-  const bottomPad = useTabBarHeight() + 56 + space[8];
 
   return (
     <Screen eyebrow="Profile" title="Account" noBottomInset>
-      <ScrollView contentContainerStyle={{ padding: space.page, paddingBottom: bottomPad, gap: space[5] }}>
-        <Card style={{ flexDirection: 'row', alignItems: 'center', gap: space[4] }}>
+      <ScrollView contentContainerStyle={{ padding: space.page, paddingBottom: space[8], gap: space[6] }}>
+        <View style={s.identity}>
           <View style={s.avatar}>
-            <UserRound size={icon.header} color={colors.accentText} strokeWidth={icon.stroke} />
+            <Text style={s.avatarText}>{initials(email)}</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text variant="label" numberOfLines={1}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text variant="label" numberOfLines={1} style={{ fontSize: 16, lineHeight: 22 }}>
               {email ?? 'Signed in'}
             </Text>
-            {userId ? <Text variant="mono">{truncateId(userId, 8, 4)}</Text> : null}
+            {userId ? <Text variant="mono" numberOfLines={1}>{truncateId(userId, 8, 4)}</Text> : null}
           </View>
-        </Card>
+        </View>
 
-        <View>
-          <Text variant="eyebrow" style={{ marginBottom: space[3] }}>
-            Security
+        <Group title="Security">
+          <Row Icon={KeyRound} title="Device key" body="RSA-2048 in the Android Keystore. Never leaves this phone." badge={<StatusBadge status={publicKey ? 'valid' : 'not-paired'} compact />} />
+          <Row Icon={Fingerprint} title="Biometric lock" body="Opens the wallet and approves every request." />
+          <Row Icon={ShieldCheck} title="Privacy" body={PRIVACY_LINE} />
+        </Group>
+
+        <Group title="Browsers & session">
+          <Row Icon={ScanLine} title="Pair a browser" body="Scan or paste the code from the extension." onPress={() => nav.navigate('Scan')} />
+          <Row Icon={Lock} title="Lock now" body="Ask for your fingerprint again." onPress={() => useSessionStore.getState().setUnlocked(false)} />
+        </Group>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setConfirm(true)}
+          style={({ pressed }) => [s.signOut, pressed && { backgroundColor: alpha(colors.danger, 0.14) }]}
+        >
+          <LogOut size={icon.nav} color={colors.danger} strokeWidth={icon.stroke} />
+          <Text variant="label" color={colors.danger} style={{ fontFamily: fonts.bodySemiBold }}>
+            Sign out
           </Text>
-          <Card style={{ padding: 0 }}>
-            <Item Icon={KeyRound} title="Device key" body="RSA-2048 in the Android Keystore. It never leaves this phone." right={<StatusBadge status={publicKey ? 'valid' : 'not-paired'} compact />} />
-            <Item Icon={Fingerprint} title="Biometric lock" body="Needed to open the wallet and to approve every request." border />
-            <Item Icon={Lock} title="Privacy" body={PRIVACY_LINE} border />
-          </Card>
-        </View>
+        </Pressable>
 
-        <View style={{ gap: space[3] }}>
-          <Text variant="eyebrow">Browsers</Text>
-          <Button label="Pair a browser" Icon={ScanLine} variant="secondary" onPress={() => nav.navigate('Scan')} />
-          <Button label="Lock now" Icon={Lock} variant="secondary" onPress={() => useSessionStore.getState().setUnlocked(false)} />
-          <Button label="Sign out" Icon={LogOut} variant="danger" onPress={() => setConfirm(true)} />
-        </View>
-
-        <Text variant="mono" align="center" style={{ color: colors.textFaint }}>
-          {API_BASE_URL}
+        <Text variant="mono" align="center" numberOfLines={1} style={{ color: colors.textFaint, fontSize: 11 }}>
+          NexusID 1.0 · {API_BASE_URL.replace(/^https?:\/\//, '')}
         </Text>
       </ScrollView>
 
@@ -74,20 +83,75 @@ export function ProfileScreen() {
   );
 }
 
-function Item({ Icon, title, body, right, border }: { Icon: typeof KeyRound; title: string; body: string; right?: React.ReactNode; border?: boolean }) {
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
+  const items = React.Children.toArray(children);
   return (
-    <View style={[s.item, border && { borderTopWidth: 1, borderTopColor: colors.borderSubtle }]}>
-      <Icon size={icon.nav} color={colors.textMuted} strokeWidth={icon.stroke} />
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text variant="label">{title}</Text>
-        <Text variant="bodySmall">{body}</Text>
-      </View>
-      {right}
+    <View style={{ gap: space[2] }}>
+      <Text variant="eyebrow" style={{ paddingHorizontal: space[1] }} accessibilityRole="header">
+        {title}
+      </Text>
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        {items.map((child, i) => (
+          <View key={i} style={i > 0 ? s.divider : undefined}>
+            {child}
+          </View>
+        ))}
+      </Card>
     </View>
   );
 }
 
+function Row({ Icon, title, body, badge, onPress }: { Icon: LucideIcon; title: string; body: string; badge?: React.ReactNode; onPress?: () => void }) {
+  const content = (
+    <>
+      <View style={s.rowIcon}>
+        <Icon size={18} color={colors.textMuted} strokeWidth={icon.stroke} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space[2], flexWrap: 'wrap' }}>
+          <Text variant="label">{title}</Text>
+          {badge}
+        </View>
+        <Text variant="bodySmall" style={{ fontSize: 13, lineHeight: 18 }}>
+          {body}
+        </Text>
+      </View>
+      {onPress ? <ChevronRight size={18} color={colors.textFaint} strokeWidth={icon.stroke} /> : null}
+    </>
+  );
+  if (!onPress) return <View style={s.row}>{content}</View>;
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={({ pressed }) => [s.row, pressed && { backgroundColor: colors.overlay }]}>
+      {content}
+    </Pressable>
+  );
+}
+
 const s = StyleSheet.create({
-  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.overlay, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  item: { flexDirection: 'row', alignItems: 'flex-start', gap: space[3], padding: space[4] },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: space[4], paddingVertical: space[1] },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: alpha(colors.accent, 0.14),
+    borderWidth: 1,
+    borderColor: alpha(colors.accent, 0.35),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { fontFamily: fonts.display, fontSize: 18, color: colors.accentText },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingVertical: space[3] + 2, minHeight: 60 },
+  rowIcon: { width: 32, height: 32, borderRadius: 8, backgroundColor: colors.overlay, alignItems: 'center', justifyContent: 'center' },
+  divider: { borderTopWidth: 1, borderTopColor: colors.borderSubtle },
+  signOut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    minHeight: 52,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: alpha(colors.danger, 0.25),
+    backgroundColor: alpha(colors.danger, 0.08),
+  },
 });

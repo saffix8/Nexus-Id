@@ -37,9 +37,9 @@ export function CodeBlock({ code, label = "code", copiedMessage = "Copied", clas
   }
 
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border bg-inset", className)}>
-      <div className="flex h-9 items-center justify-between border-b border-border-subtle pl-4 pr-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted">{label}</span>
+    <div className={cn("min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-inset", className)}>
+      <div className="flex h-9 items-center justify-between gap-3 border-b border-border-subtle pl-4 pr-1.5">
+        <span className="min-w-0 truncate font-mono text-[11px] text-text-muted">{label}</span>
         <Button
           variant="ghost"
           size="sm"
@@ -55,7 +55,7 @@ export function CodeBlock({ code, label = "code", copiedMessage = "Copied", clas
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed text-foreground">
+      <pre className="overflow-x-auto p-4 font-mono text-[12px] leading-relaxed text-foreground sm:text-[13px]">
         <code>{code}</code>
       </pre>
     </div>

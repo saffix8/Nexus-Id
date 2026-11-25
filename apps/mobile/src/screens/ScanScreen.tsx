@@ -2,7 +2,7 @@
 // corners. Pairing signs the challenge with the device key (ALG-007, via
 // crypto.service.ts) and redeems it (API-025).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, {
   FadeIn,
   useAnimatedStyle,
@@ -32,7 +32,7 @@ import { apiService, ApiError } from '../services/api.service';
 import { parsePairingPayload, type QrPurpose } from '../lib/pairing';
 import { useAuthStore } from '../store/auth.store';
 import type { RootStackParamList } from '../navigation/types';
-import { colors, space } from '../styles/tokens';
+import { colors, radius, space } from '../styles/tokens';
 import { AnimatedCheck } from '../components/AnimatedCheck';
 import {
   Button,
@@ -176,36 +176,58 @@ export function ScanScreen({ navigation }: Props) {
         onBack={CAN_SCAN_QR ? () => setPasteMode(false) : navigation.goBack}
         title="Paste code"
       >
-        <View style={{ gap: space[4] }}>
-          <Text variant="bodySmall">
-            In the NexusID extension, press Copy code under the QR. Then
-            long-press the box below and choose Paste.
-          </Text>
-          <TextField
-            label="Pairing code"
-            value={pasted}
-            onChangeText={t => {
-              setPasted(t);
-              if (phase.kind === 'error') retry();
-            }}
-            placeholder="http://localhost:3000/pair#p=…"
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-            mono
-            error={phase.kind === 'error' ? phase.message : undefined}
-          />
-          <Button
-            label={phase.kind === 'claiming' ? 'Pairing…' : 'Pair'}
-            Icon={Link2}
-            loading={phase.kind === 'claiming'}
-            disabled={!pasted.trim() || phase.kind === 'claiming'}
-            onPress={() => {
-              busy.current = false;
-              void handle(pasted);
-            }}
-          />
-        </View>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ padding: space.page, paddingTop: space[3], gap: space[5] }}
+          >
+            <View style={s.steps}>
+              {[
+                'Open the NexusID extension in Chrome.',
+                'Press Copy code under the QR.',
+                'Long-press the box below and choose Paste.',
+              ].map((line, i) => (
+                <View key={line} style={s.stepRow}>
+                  <View style={s.stepNum}>
+                    <Text variant="mono" color={colors.text} style={{ fontSize: 11, lineHeight: 14 }}>
+                      {i + 1}
+                    </Text>
+                  </View>
+                  <Text variant="bodySmall" color={colors.text} style={{ flex: 1 }}>
+                    {line}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <TextField
+              label="Pairing code"
+              value={pasted}
+              onChangeText={t => {
+                setPasted(t);
+                if (phase.kind === 'error') retry();
+              }}
+              placeholder="http://localhost:3000/pair#p=…"
+              autoCapitalize="none"
+              autoCorrect={false}
+              multiline
+              mono
+              error={phase.kind === 'error' ? phase.message : undefined}
+            />
+            <Button
+              label={phase.kind === 'claiming' ? 'Pairing…' : 'Pair browser'}
+              Icon={Link2}
+              loading={phase.kind === 'claiming'}
+              disabled={!pasted.trim() || phase.kind === 'claiming'}
+              onPress={() => {
+                busy.current = false;
+                void handle(pasted);
+              }}
+            />
+            <Text variant="bodySmall" align="center" style={{ fontSize: 13 }}>
+              The code works once and expires after 2 minutes.
+            </Text>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Screen>
     );
   }
@@ -484,6 +506,24 @@ function Corners({
 }
 
 const s = StyleSheet.create({
+  steps: {
+    gap: space[3],
+    padding: space[4],
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
+  stepNum: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   root: { flex: 1, backgroundColor: '#000' },
   center: {
     flex: 1,

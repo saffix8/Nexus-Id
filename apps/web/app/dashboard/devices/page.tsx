@@ -11,6 +11,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PairedDevices } from "@/components/nexus/PairedDevices";
+import { PageHeader } from "@/components/nexus/PageHeader";
 import { useNow } from "@/hooks/use-now";
 import { PAIRINGS_KEY } from "@/lib/userApi";
 import { parsePairingInput, redeemPairingChallenge } from "@/lib/pairing";
@@ -56,7 +57,7 @@ function PairBrowserCard() {
 
   const error = errors.pairingCode?.message;
   return (
-    <Card className="space-y-4 p-5 shadow-none">
+    <Card className="space-y-4 p-4 sm:p-5">
       <div className="space-y-1">
         <h2 className="font-display text-base font-semibold text-foreground">
           Pair a browser
@@ -108,12 +109,12 @@ function PairBrowserCard() {
 export default function DevicesPage() {
   const now = useNow();
   return (
-    <div className="space-y-6">
-      <p className="max-w-2xl text-sm text-text-muted">
-        Browsers paired with your account can send you verification requests.
-        Revoke one to stop them.
-      </p>
-      <div className="grid gap-6 lg:grid-cols-2">
+    <div className="space-y-6 sm:space-y-8">
+      <PageHeader
+        title="Devices"
+        description="Browsers paired with your account can send you verification requests. Revoke one to stop them."
+      />
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
         <PairedDevices now={now} showPairLink={false} />
         <PairBrowserCard />
       </div>

@@ -13,6 +13,7 @@ import {
   CredentialCard,
   EmptyState,
   ErrorState,
+  PageHeader,
   type CredentialCardStatus,
 } from "@/components/nexus";
 import { PRIVACY_LINE, predicatesFor } from "@/components/nexus/category";
@@ -53,25 +54,26 @@ export default function CredentialsPage() {
   const open = () => setModalOpen(true);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <p className="text-sm text-text-muted">
-          Signed by the issuer, bound to this device. {PRIVACY_LINE}
-        </p>
-        {credentials.data && credentials.data.length > 0 && (
-          <Button onClick={open}>
-            <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
-            Add credential
-          </Button>
-        )}
-      </div>
+    <div className="space-y-6 sm:space-y-8">
+      <PageHeader
+        title="Credentials"
+        description={<>Signed by the issuer, bound to this device. {PRIVACY_LINE}</>}
+        actions={
+          credentials.data && credentials.data.length > 0 ? (
+            <Button onClick={open}>
+              <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
+              Add credential
+            </Button>
+          ) : undefined
+        }
+      />
 
       {credentials.isPending ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
           {[0, 1].map((i) => (
             <Skeleton
               key={i}
-              className="aspect-[1.586] w-full max-w-[400px] rounded-2xl"
+              className="aspect-[1.586] w-full max-w-[420px] rounded-2xl"
             />
           ))}
         </div>
@@ -90,7 +92,7 @@ export default function CredentialsPage() {
           action={{ label: "Add credential", onClick: open }}
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
           {credentials.data.map((c) => (
             <CredentialCard
               key={c.id}

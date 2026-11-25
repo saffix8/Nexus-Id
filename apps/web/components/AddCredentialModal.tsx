@@ -214,7 +214,7 @@ function SourceSelect({
   onSelect: (s: CredentialSource) => void;
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
       {SOURCES.map(({ source, category }) => {
         const meta = categoryMeta(category);
         return (
@@ -222,16 +222,11 @@ function SourceSelect({
             key={source}
             type="button"
             onClick={() => onSelect(source)}
-            className="group relative flex flex-col items-start gap-3 overflow-hidden rounded-xl border border-border bg-surface p-4 pl-5 text-left transition-colors duration-150 hover:border-border-strong hover:bg-overlay focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="group relative flex items-start gap-3.5 overflow-hidden rounded-xl border border-border bg-surface p-4 text-left transition-colors duration-150 hover:border-border-strong hover:bg-overlay focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:flex-col sm:gap-3"
           >
             <span
-              className="absolute inset-y-0 left-0 w-1"
-              style={{ background: meta.color }}
-              aria-hidden="true"
-            />
-            <span
               className={cn(
-                "flex size-10 items-center justify-center rounded-lg border",
+                "flex size-10 shrink-0 items-center justify-center rounded-lg border",
                 meta.tint,
               )}
             >
@@ -241,19 +236,14 @@ function SourceSelect({
                 aria-hidden="true"
               />
             </span>
-            <span>
-              <span
-                className={cn(
-                  "block text-[11px] font-medium uppercase tracking-[0.08em]",
-                  meta.text,
-                )}
-              >
-                {meta.label}
-              </span>
-              <span className="mt-0.5 block font-display text-sm font-semibold text-foreground">
+            <span className="min-w-0">
+              <span className="block font-display text-sm font-semibold text-foreground">
                 {meta.issuerName}
               </span>
-              <span className="mt-1 block text-xs text-text-muted">
+              <span className={cn("mt-0.5 block text-xs", meta.text)}>
+                {meta.label}
+              </span>
+              <span className="mt-2 block text-xs leading-relaxed text-text-muted">
                 {predicatesFor(category).map(predicateLabel).join(" · ")}
               </span>
             </span>

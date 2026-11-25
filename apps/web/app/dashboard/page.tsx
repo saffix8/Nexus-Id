@@ -25,7 +25,8 @@ import {
   outcomeStateFromVerification,
 } from "@/components/nexus/OutcomeBadge";
 import { PredicateChip } from "@/components/nexus/PredicateChip";
-import { StatCard } from "@/components/nexus/StatCard";
+import { StatCard, StatGroup } from "@/components/nexus/StatCard";
+import { PageHeader } from "@/components/nexus/PageHeader";
 import { useNow } from "@/hooks/use-now";
 import { PairedDevices } from "@/components/nexus/PairedDevices";
 import { relativeTime as relative } from "@/components/nexus/time";
@@ -49,26 +50,21 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">
-            Overview
-          </h2>
-          <p className="text-sm text-text-muted">
-            Your credentials stay on your phone. This page shows what you shared
-            and who can ask.
-          </p>
-        </div>
-        <Button asChild className="gap-1.5">
-          <Link href="/dashboard/credentials">
-            <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
-            Add credential
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Overview"
+        description="Your credentials stay on your phone. This page shows what you shared and who can ask."
+        actions={
+          <Button asChild className="gap-1.5">
+            <Link href="/dashboard/credentials">
+              <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
+              Add credential
+            </Link>
+          </Button>
+        }
+      />
 
       {/* KPI row */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <StatGroup cols={3}>
         <StatCard
           label="Credentials"
           icon={WalletCards}
@@ -96,9 +92,9 @@ export default function DashboardPage() {
           value={pairings.isError ? "—" : active.length}
           hint={pairings.isError ? "Couldn't load" : "Can send you requests"}
         />
-      </div>
+      </StatGroup>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <PairedDevices now={now} />
         <RecentActivity now={now} />
       </div>
@@ -113,8 +109,8 @@ function RecentActivity({ now }: { now: number | null }) {
   const recent = (history.data ?? []).slice(0, RECENT);
 
   return (
-    <Card className="flex flex-col shadow-none">
-      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5">
+    <Card className="flex flex-col">
+      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-4 sm:p-5">
         <div className="space-y-1">
           <h3 className="font-display text-base font-semibold text-foreground">
             Recent activity
@@ -163,7 +159,7 @@ function RecentActivity({ now }: { now: number | null }) {
       ) : (
         <ul className="divide-y divide-border-subtle">
           {recent.map((e) => (
-            <li key={e.requestId} className="flex items-center gap-3 px-5 py-3">
+            <li key={e.requestId} className="flex items-center gap-3 px-4 py-3 sm:px-5">
               <span
                 className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay font-display text-sm font-semibold text-foreground"
                 aria-hidden="true"

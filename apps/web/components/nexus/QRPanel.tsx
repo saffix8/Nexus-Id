@@ -110,7 +110,7 @@ export function QRPanel({
   return (
     <Card
       className={cn(
-        "flex gap-8 p-5 shadow-none",
+        "flex gap-8 p-5",
         layout === "side" ? "flex-col items-center sm:flex-row sm:items-center" : "flex-col items-center",
         className,
       )}

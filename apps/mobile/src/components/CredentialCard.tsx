@@ -20,7 +20,7 @@ import { predicateLabel, type CredentialType } from '@nexusid/types';
 import { categoryMeta } from '../lib/category';
 import { formatExpiry, truncateId } from '../lib/format';
 import type { CredentialUiStatus } from '../lib/wallet';
-import { alpha, colors, icon, radius, space } from '../styles/tokens';
+import { alpha, colors, fonts, icon, radius, space } from '../styles/tokens';
 import { StatusBadge, Text } from '../ui';
 
 export const CARD_RATIO = 1.586; // ID-1 card
@@ -51,6 +51,7 @@ export function CredentialCard({
   const meta = categoryMeta(category);
   const { Icon } = meta;
   const height = width / CARD_RATIO;
+  const compact = width < 330;
   const revoked = status === 'revoked';
   const expired = status === 'expired';
   const issuer = issuerName ?? meta.issuerName;
@@ -58,7 +59,7 @@ export function CredentialCard({
   const glowId = `r-${category}`;
 
   const body = (
-    <View style={[s.card, { width, height, opacity: revoked ? 0.6 : 1 }]}>
+    <View style={[s.card, { width, height, opacity: revoked ? 0.6 : 1, padding: compact ? space[4] : space[5] }]}>
       {/* Background: radial glow top-right (8%) + guilloche 45° lines (4%) */}
       <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
         <Defs>
@@ -70,7 +71,7 @@ export function CredentialCard({
             ry={width * 0.75}
             gradientUnits="userSpaceOnUse"
           >
-            <Stop offset="0" stopColor={meta.color} stopOpacity={0.14} />
+            <Stop offset="0" stopColor={meta.color} stopOpacity={0.2} />
             <Stop offset="1" stopColor={meta.color} stopOpacity={0} />
           </RadialGradient>
           <Pattern
@@ -95,57 +96,62 @@ export function CredentialCard({
         <Rect width={width} height={height} fill={`url(#${glowId})`} />
       </Svg>
 
-      {/* Category strip */}
-      <View style={[s.strip, { backgroundColor: meta.color }]} />
-
       <View style={s.header}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text
-            variant="eyebrow"
-            color={meta.color}
-            style={revoked && s.strike}
-          >
+        <View style={s.headerLeft}>
+          <View style={[s.emblem, { backgroundColor: alpha(meta.color, 0.12), borderColor: alpha(meta.color, 0.3) }]}>
+            <Icon size={16} color={meta.color} strokeWidth={icon.stroke} />
+          </View>
+          <Text variant="eyebrow" color={meta.color} numberOfLines={1} style={[{ flexShrink: 1 }, revoked && s.strike]}>
             {meta.label}
           </Text>
-          <Text variant="label" numberOfLines={1} style={revoked && s.strike}>
-            {issuer}
-          </Text>
         </View>
-        <StatusBadge status={status} />
+        <StatusBadge status={status} compact={compact} />
       </View>
 
       <View style={s.middle}>
-        <View
-          style={[s.iconTile, { backgroundColor: alpha(meta.color, 0.15) }]}
-        >
-          <Icon
-            size={icon.empty * 0.85}
-            color={meta.color}
-            strokeWidth={icon.stroke}
-          />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.15}
+            style={[s.issuer, compact && s.issuerCompact, revoked && s.strike]}
+          >
+            {issuer}
+          </Text>
+          <Text variant="bodySmall" numberOfLines={1} maxFontSizeMultiplier={1.15} style={s.sub}>
+            Verifiable credential · SD-JWT
+          </Text>
+        </View>
+        {/* contact chip — the "document" cue */}
+        <View style={s.chipArt} accessibilityElementsHidden importantForAccessibility="no">
+          <View style={s.chipLine} />
+          <View style={s.chipLine} />
         </View>
       </View>
 
-      <View style={{ gap: 2 }}>
-        <Text variant="eyebrow">Confirms</Text>
-        <Text variant="bodySmall" color={colors.text} numberOfLines={1}>
-          {predicates.length ? predicates.map(predicateLabel).join(' · ') : '—'}
-        </Text>
+      <View style={s.preds} accessibilityLabel={`Confirms ${predicates.map(predicateLabel).join(', ')}`}>
+        {predicates.length ? (
+          predicates.map(p => (
+            <View key={p} style={s.pred}>
+              <Text numberOfLines={1} maxFontSizeMultiplier={1.1} style={s.predText}>
+                {predicateLabel(p)}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <Text variant="bodySmall">No conditions</Text>
+        )}
       </View>
 
       <View style={s.footer}>
-        <Text variant="mono">
-          <Text variant="mono" color={colors.textFaint}>
+        <Text variant="mono" numberOfLines={1} maxFontSizeMultiplier={1.1} style={s.footText}>
+          <Text variant="mono" color={colors.textFaint} style={s.footText}>
             ID{'  '}
           </Text>
           {truncateId(credentialId)}
         </Text>
-        <Text variant="mono" color={expired ? colors.danger : colors.textMuted}>
-          <Text
-            variant="mono"
-            color={expired ? colors.danger : colors.textFaint}
-          >
-            EXPIRES{'  '}
+        <Text variant="mono" maxFontSizeMultiplier={1.1} color={expired ? colors.danger : colors.textMuted} style={s.footText}>
+          <Text variant="mono" color={expired ? colors.danger : colors.textFaint} style={s.footText}>
+            EXP{'  '}
           </Text>
           {formatExpiry(expiresAt)}
         </Text>
@@ -177,23 +183,47 @@ const s = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
     overflow: 'hidden',
-    padding: space[5],
-    paddingLeft: space[6],
+    justifyContent: 'space-between',
   },
-  strip: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
-  header: { flexDirection: 'row', alignItems: 'flex-start', gap: space[3] },
-  middle: { flex: 1, justifyContent: 'center' },
-  iconTile: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    alignItems: 'center',
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: space[2], flex: 1, minWidth: 0 },
+  emblem: { width: 30, height: 30, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  middle: { flexDirection: 'row', alignItems: 'flex-end', gap: space[3] },
+  issuer: { fontFamily: fonts.display, fontSize: 20, lineHeight: 26, letterSpacing: -0.2, color: colors.text },
+  issuerCompact: { fontSize: 18, lineHeight: 24 },
+  sub: { fontSize: 12, lineHeight: 16 },
+  chipArt: {
+    width: 34,
+    height: 26,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 5,
+    marginBottom: 2,
   },
+  chipLine: { height: 1, backgroundColor: 'rgba(255,255,255,0.16)' },
+  preds: { flexDirection: 'row', flexWrap: 'nowrap', gap: 6, overflow: 'hidden', height: 22 },
+  pred: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+    height: 22,
+  },
+  predText: { fontFamily: fonts.bodyMedium, fontSize: 11, lineHeight: 14, color: colors.text },
   footer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: space[3],
+    gap: space[3],
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingTop: space[2],
   },
+  footText: { fontSize: 11, lineHeight: 14 },
   strike: { textDecorationLine: 'line-through' },
 });

@@ -16,21 +16,37 @@ interface AuthFrameProps {
 
 export function AuthFrame({ title, description, children, footer, size = "sm" }: AuthFrameProps) {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
-      <div className={cn("flex w-full flex-col gap-6", size === "sm" ? "max-w-sm" : "max-w-3xl")}>
-        <Link href="/" className="flex items-center gap-2 self-center font-display text-lg font-semibold text-foreground">
+    <div className="flex min-h-svh flex-col bg-background">
+      <header className="flex h-16 items-center px-4 sm:px-6">
+        <Link href="/" className="flex items-center gap-2.5 font-display text-base font-semibold text-foreground">
           <LogoMark className="size-7 text-sm" />
           NexusID
         </Link>
-        <Card className="p-6 shadow-none md:p-8">
-          <div className="mb-6 space-y-1.5 text-center">
-            <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">{title}</h1>
-            {description && <p className="text-sm text-text-muted">{description}</p>}
-          </div>
-          {children}
-        </Card>
-        {footer && <div className="text-center text-sm text-text-muted">{footer}</div>}
-      </div>
+      </header>
+      <main className="flex flex-1 flex-col items-center justify-center px-4 pb-16 pt-4 sm:px-6 sm:pb-24">
+        <div className={cn("flex w-full flex-col gap-6", size === "sm" ? "max-w-[400px]" : "max-w-3xl")}>
+          {size === "lg" ? (
+            <div>
+              <div className="mb-8 space-y-2 text-center">
+                <h1 className="font-display text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground sm:text-3xl">
+                  {title}
+                </h1>
+                {description && <p className="text-sm text-text-muted sm:text-[15px]">{description}</p>}
+              </div>
+              {children}
+            </div>
+          ) : (
+            <Card className="border-0 bg-transparent p-0 shadow-none sm:border sm:bg-card sm:p-8 sm:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03)]">
+              <div className="mb-7 space-y-1.5 sm:text-center">
+                <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">{title}</h1>
+                {description && <p className="text-sm leading-relaxed text-text-muted">{description}</p>}
+              </div>
+              {children}
+            </Card>
+          )}
+          {footer && <div className="text-sm text-text-muted sm:text-center">{footer}</div>}
+        </div>
+      </main>
     </div>
   );
 }

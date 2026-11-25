@@ -2,12 +2,13 @@
 // "Request → Share" screen and the Microsoft Authenticator approve push.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, StyleSheet, View } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs, type BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
+import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView, useBottomSheetSpringConfigs, type BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, EyeOff, Fingerprint, ShieldCheck, TimerOff, CircleX } from 'lucide-react-native';
 import { predicateLabel } from '@nexusid/types';
 import { predicateSentence, PRIVACY_LINE } from '../lib/copy';
 import { alpha, colors, fonts, icon, motion, radius, sheetShadow, space } from '../styles/tokens';
+import { useLayout } from '../styles/layout';
 import { Button, ConfirmDialog, CountdownRing, Divider, Text } from '../ui';
 
 export interface ConsentCredential {
@@ -36,6 +37,10 @@ interface Props {
 
 export function ConsentSheet(p: Props) {
   const insets = useSafeAreaInsets();
+  const { compact, wide, height, width } = useLayout();
+  // The full "Approve with fingerprint" label needs ~240 dp; stack the buttons below ~400 dp wide.
+  const stack = compact || width < 400;
+  const gapY = compact ? space[3] : space[4];
   const [confirmDecline, setConfirmDecline] = useState(false);
   const expired = p.remaining <= 0;
   const missing = !p.credential;
@@ -73,9 +78,13 @@ export function ConsentSheet(p: Props) {
         backgroundStyle={s.sheetBg}
         handleIndicatorStyle={s.handle}
         style={sheetShadow}
+        maxDynamicContentSize={height - insets.top - space[4]}
         accessibilityLabel={`Verification request from ${p.verifierName}`}
       >
-        <BottomSheetView style={[s.content, { paddingBottom: insets.bottom + space[5] }]}>
+        <BottomSheetScrollView
+          bounces={false}
+          contentContainerStyle={[s.content, { paddingBottom: insets.bottom + space[5] }, wide && s.wideContent]}
+        >
           {/* Requester */}
           <View style={[s.row, expired && s.greyed]}>
             <View style={s.avatar}>
@@ -95,11 +104,11 @@ export function ConsentSheet(p: Props) {
             {!expired ? <CountdownRing remaining={p.remaining} /> : null}
           </View>
 
-          <Text variant="body" color={colors.text} style={[{ marginTop: space[4] }, expired && s.greyed]}>
+          <Text variant="body" color={colors.text} style={[{ marginTop: gapY }, compact && { fontSize: 15, lineHeight: 22 }, expired && s.greyed]}>
             {p.verifierName} wants to confirm {predicateSentence(p.predicate)}.
           </Text>
 
-          <Divider />
+          <Divider spacing={gapY} />
 
           {/* Will be confirmed */}
           <View style={expired && s.greyed}>
@@ -127,7 +136,7 @@ export function ConsentSheet(p: Props) {
             </View>
           </View>
 
-          <Divider />
+          <Divider spacing={gapY} />
 
           {/* Never shared */}
           <View style={expired && s.greyed}>
@@ -142,12 +151,14 @@ export function ConsentSheet(p: Props) {
                 {p.neverShared.join(' · ')}
               </Text>
             </View>
-            <Text variant="bodySmall" color={colors.textMuted} style={{ marginTop: space[3] }}>
-              {PRIVACY_LINE}
-            </Text>
+            {!compact ? (
+              <Text variant="bodySmall" color={colors.textMuted} style={{ marginTop: space[3] }}>
+                {PRIVACY_LINE}
+              </Text>
+            ) : null}
           </View>
 
-          <Divider />
+          <Divider spacing={gapY} />
 
           {/* Credential used / state banners */}
           {expired ? (
@@ -177,29 +188,36 @@ export function ConsentSheet(p: Props) {
           )}
 
           {/* Actions */}
-          <View style={[s.actions]}>
+          <View style={[s.actions, { marginTop: compact ? space[4] : space[5] }, stack && s.actionsStacked]}>
             {expired ? (
               <Button label="Close" variant="secondary" onPress={p.onClose} style={{ flex: 1 }} />
             ) : missing ? (
               <>
-                <Button label="Decline" variant="secondary" onPress={() => setConfirmDecline(true)} style={{ flex: 1 }} loading={p.declining} />
-                {p.onAddCredential ? <Button label="Add credential" onPress={p.onAddCredential} style={{ flex: 2 }} /> : null}
+                <Button label="Decline" variant="secondary" onPress={() => setConfirmDecline(true)} style={stack ? undefined : { flex: 1 }} loading={p.declining} />
+                {p.onAddCredential ? <Button label="Add credential" onPress={p.onAddCredential} style={stack ? undefined : { flex: 2 }} /> : null}
               </>
             ) : (
               <>
-                <Button label="Decline" variant="secondary" onPress={() => setConfirmDecline(true)} disabled={p.approving} loading={p.declining} style={{ flex: 1 }} />
+                <Button
+                  label="Decline"
+                  variant="secondary"
+                  onPress={() => setConfirmDecline(true)}
+                  disabled={p.approving}
+                  loading={p.declining}
+                  style={stack ? undefined : { flex: 1 }}
+                />
                 <Button
                   label="Approve with fingerprint"
                   Icon={Fingerprint}
                   onPress={p.onApprove}
                   loading={p.approving}
                   disabled={p.declining}
-                  style={{ flex: 2 }}
+                  style={stack ? undefined : { flex: 2 }}
                 />
               </>
             )}
           </View>
-        </BottomSheetView>
+        </BottomSheetScrollView>
       </BottomSheet>
 
       <ConfirmDialog
@@ -228,6 +246,9 @@ const s = StyleSheet.create({
   claimRow: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
   checkTile: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.overlay, alignItems: 'center', justifyContent: 'center' },
   banner: { flexDirection: 'row', gap: space[3], alignItems: 'flex-start', borderWidth: 1, borderRadius: radius.card, padding: space[4] },
-  actions: { flexDirection: 'row', gap: space[3], marginTop: space[5] },
+  actions: { flexDirection: 'row', gap: space[3] },
+  // Primary on top when stacked (column-reverse keeps Decline first in reading order on wide).
+  actionsStacked: { flexDirection: 'column-reverse', gap: space[2] },
+  wideContent: { width: '100%', maxWidth: 560, alignSelf: 'center' },
   greyed: { opacity: 0.45 },
 });

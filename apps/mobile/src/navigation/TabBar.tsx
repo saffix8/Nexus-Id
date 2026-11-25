@@ -1,12 +1,12 @@
-// Bottom tabs with labels (Wallet · History · Profile) and a centred floating
-// Scan button — DESIGN.md §6.2. Tab bar = surface, top border = border.
+// Bottom tabs (Wallet · Scan · History · Profile) — DESIGN.md §6.2.
+// The Scan button is docked in the centre of the bar (raised slightly above it) instead of
+// floating over the screen, so it can never cover content on short phones.
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { History, ScanLine, UserRound, WalletCards, type LucideIcon } from 'lucide-react-native';
-import { colors, fonts, icon, space } from '../styles/tokens';
+import { alpha, colors, fonts, icon, space } from '../styles/tokens';
 import { Text } from '../ui';
 
 const TABS: Record<string, { label: string; Icon: LucideIcon }> = {
@@ -16,80 +16,98 @@ const TABS: Record<string, { label: string; Icon: LucideIcon }> = {
 };
 
 /** Tab bar row height without the bottom inset. */
-export const TAB_BAR_HEIGHT = 64;
+export const TAB_BAR_HEIGHT = 60;
+const SCAN_SIZE = 56;
 
 export function useTabBarHeight(): number {
   const insets = useSafeAreaInsets();
   return TAB_BAR_HEIGHT + Math.max(insets.bottom, space[2]);
 }
 
-export function TabBar({ state, navigation }: BottomTabBarProps) {
-  const height = useTabBarHeight();
+function TabButton({ name, focused, onPress }: { name: string; focused: boolean; onPress: () => void }) {
+  const meta = TABS[name];
+  const tint = focused ? colors.text : colors.textMuted;
   return (
-    <View style={[s.bar, { height }]}>
-      {state.routes.map((route, index) => {
-        const meta = TABS[route.name];
-        const focused = state.index === index;
-        return (
-          <Pressable
-            key={route.key}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: focused }}
-            accessibilityLabel={meta.label}
-            onPress={() => {
-              const e = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-              if (!focused && !e.defaultPrevented) navigation.navigate(route.name);
-            }}
-            style={s.tab}
-          >
-            <View style={[s.pill, focused && { backgroundColor: colors.overlay }]}>
-              <meta.Icon size={icon.nav} color={focused ? colors.accentText : colors.textMuted} strokeWidth={icon.stroke} />
-            </View>
-            <Text
-              variant="bodySmall"
-              style={{ fontSize: 12, lineHeight: 16, fontFamily: focused ? fonts.bodySemiBold : fonts.body }}
-              color={focused ? colors.text : colors.textMuted}
-            >
-              {meta.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: focused }}
+      accessibilityLabel={meta.label}
+      onPress={onPress}
+      android_ripple={{ color: alpha(colors.text, 0.06), borderless: true, radius: 40 }}
+      style={s.tab}
+    >
+      <meta.Icon size={20} color={focused ? colors.accentText : colors.textMuted} strokeWidth={focused ? 2 : icon.stroke} />
+      <Text
+        variant="bodySmall"
+        numberOfLines={1}
+        maxFontSizeMultiplier={1.15}
+        style={{ fontSize: 11, lineHeight: 14, fontFamily: focused ? fonts.bodySemiBold : fonts.bodyMedium }}
+        color={tint}
+      >
+        {meta.label}
+      </Text>
+    </Pressable>
   );
 }
 
-/** Centred floating Scan button (56 px, accent fill), rendered above the tab bar. */
-export function ScanFab() {
-  const navigation = useNavigation();
-  const bottom = useTabBarHeight() + space[4];
+export function TabBar({ state, navigation }: BottomTabBarProps) {
+  const height = useTabBarHeight();
+  const go = (index: number) => {
+    const route = state.routes[index];
+    const focused = state.index === index;
+    const e = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+    if (!focused && !e.defaultPrevented) navigation.navigate(route.name);
+  };
+  const routes = state.routes.map((r, i) => ({ r, i }));
+  const left = routes.filter(({ r }) => r.name === 'Wallet');
+  const right = routes.filter(({ r }) => r.name !== 'Wallet');
+
   return (
-    <View pointerEvents="box-none" style={[s.fabRow, { bottom }]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Scan QR code"
-        onPress={() => navigation.navigate('Scan')}
-        style={({ pressed }) => [s.fab, pressed && { backgroundColor: colors.accentHover, transform: [{ scale: 0.97 }] }]}
-      >
-        <ScanLine size={26} color={colors.white} strokeWidth={2} />
-      </Pressable>
+    <View style={[s.bar, { height }]}>
+      {left.map(({ r, i }) => (
+        <TabButton key={r.key} name={r.name} focused={state.index === i} onPress={() => go(i)} />
+      ))}
+
+      <View style={s.scanSlot}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Scan QR code"
+          onPress={() => navigation.navigate('Scan' as never)}
+          style={({ pressed }) => [s.scan, pressed && { backgroundColor: colors.accentHover, transform: [{ scale: 0.96 }] }]}
+        >
+          <ScanLine size={18} color={colors.white} strokeWidth={2} />
+        </Pressable>
+        <Text variant="bodySmall" maxFontSizeMultiplier={1.15} style={s.scanLabel} color={colors.text}>
+          Scan
+        </Text>
+      </View>
+
+      {right.map(({ r, i }) => (
+        <TabButton key={r.key} name={r.name} focused={state.index === i} onPress={() => go(i)} />
+      ))}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  bar: { flexDirection: 'row', backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: space[2] },
-  tab: { flex: 1, alignItems: 'center', gap: 2, minHeight: 48 },
-  pill: { width: 56, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  fabRow: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  fab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  bar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: colors.border,
+    paddingTop: space[2],
+    paddingHorizontal: space[2],
+  },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'flex-start', gap: 4, minHeight: 48, paddingTop: 5 },
+  scanSlot: { flex: 1, alignItems: 'center', paddingTop: 0 },
+  // Fully inside the bar: never overlaps screen content.
+  scan: {
+    width: SCAN_SIZE,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: colors.bg,
   },
+  scanLabel: { fontSize: 11, lineHeight: 14, marginTop: 4, fontFamily: fonts.bodyMedium },
 });

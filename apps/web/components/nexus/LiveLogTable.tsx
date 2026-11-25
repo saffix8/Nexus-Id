@@ -86,8 +86,8 @@ export function LiveLogTable({
   }
 
   return (
-    <Card className={cn("overflow-hidden shadow-none", className)}>
-      <div className="flex h-14 items-center justify-between border-b border-border-subtle px-5">
+    <Card className={cn("overflow-hidden", className)}>
+      <div className="flex h-14 items-center justify-between gap-3 border-b border-border-subtle px-4 sm:px-5">
         <div className="flex items-center gap-2">
           <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>
           <Tooltip>
@@ -132,14 +132,52 @@ export function LiveLogTable({
           description="Verification sessions from your site will appear here within seconds of the user approving."
         />
       ) : (
-        <Table>
+        <>
+        {/* Phones: one stacked row per session */}
+        <ul className="divide-y divide-border-subtle md:hidden">
+          {loading && !rows
+            ? Array.from({ length: 4 }, (_, i) => (
+                <li key={i} className="space-y-2 px-4 py-3.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-5 w-24 rounded-full" />
+                </li>
+              ))
+            : rows?.map((row) => (
+                <li
+                  key={row.id}
+                  className={cn(
+                    "flex items-start justify-between gap-3 px-4 py-3.5",
+                    fresh.has(row.id) &&
+                      "motion-safe:animate-[rowIn_200ms_ease-out,rowFlash_1.5s_ease-out] motion-reduce:animate-row-flash",
+                  )}
+                >
+                  <div className="min-w-0 space-y-2">
+                    <PredicateChip code={row.predicate} />
+                    <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
+                      <span className="num">{now === null ? "…" : relativeTime(row.createdAt, now)}</span>
+                      <span aria-hidden="true" className="text-text-faint">·</span>
+                      <button
+                        type="button"
+                        onClick={() => copySession(row.sessionId)}
+                        aria-label={`Copy session ID ${row.sessionId}`}
+                        className="rounded font-mono text-text-muted hover:text-foreground"
+                      >
+                        {truncateId(row.sessionId, 8, 4)}
+                      </button>
+                    </p>
+                  </div>
+                  <OutcomeBadge state={outcomeStateFromVerification(row.outcome)} variant="dot" className="shrink-0" />
+                </li>
+              ))}
+        </ul>
+        <Table className="hidden md:table">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="pl-5">Time</TableHead>
               <TableHead>Session</TableHead>
               <TableHead>Condition</TableHead>
               <TableHead>Outcome</TableHead>
-              <TableHead className="pr-5">Proof hash</TableHead>
+              <TableHead className="hidden pr-5 lg:table-cell">Proof hash</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -150,7 +188,7 @@ export function LiveLogTable({
                     <TableCell><Skeleton className="h-4 w-28" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-24 rounded-full" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
-                    <TableCell className="pr-5"><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell className="hidden pr-5 lg:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
                   </TableRow>
                 ))
               : rows?.map((row) => (
@@ -161,7 +199,7 @@ export function LiveLogTable({
                         "motion-safe:animate-[rowIn_200ms_ease-out,rowFlash_1.5s_ease-out] motion-reduce:animate-row-flash",
                     )}
                   >
-                    <TableCell className="whitespace-nowrap pl-5 text-text-muted">
+                    <TableCell className="num whitespace-nowrap pl-5 text-text-muted">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span tabIndex={0} className="cursor-default">
@@ -190,13 +228,14 @@ export function LiveLogTable({
                     <TableCell>
                       <OutcomeBadge state={outcomeStateFromVerification(row.outcome)} variant="dot" />
                     </TableCell>
-                    <TableCell className="pr-5 font-mono text-xs text-text-muted">
+                    <TableCell className="hidden pr-5 font-mono text-xs text-text-muted lg:table-cell">
                       {row.proofHash ? row.proofHash.slice(0, 10) : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
           </TableBody>
         </Table>
+        </>
       )}
     </Card>
   );

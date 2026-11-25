@@ -10,7 +10,6 @@ import type { HistoryRecordDTO } from '../services/api.service';
 import { categoryMeta, categoryOfPredicate } from '../lib/category';
 import { dayKey, dayLabel, formatTime } from '../lib/format';
 import { outcomeStatus } from '../lib/status';
-import { useTabBarHeight } from '../navigation/TabBar';
 import { useHistoryStore } from '../store/history.store';
 import { alpha, colors, fonts, radius, space } from '../styles/tokens';
 import { errorMessage } from '../lib/wallet';
@@ -43,7 +42,7 @@ export function HistoryScreen() {
       setConfirm(null);
     }
   }
-  const bottomPad = useTabBarHeight() + 56 + space[8];
+  const bottomPad = space[8];
 
   useFocusEffect(
     useCallback(() => {

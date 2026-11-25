@@ -37,6 +37,7 @@ import {
   radius,
   space,
 } from '../styles/tokens';
+import { MAX_CONTENT } from '../styles/layout';
 import { Button, IconTile, Screen, Spinner, Text, TextField, toast } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddCredential'>;
@@ -304,61 +305,47 @@ export function AddCredentialScreen({ route, navigation }: Props) {
 // ── Pick source (2×2 category tiles, Google Wallet "Add to wallet") ─────────
 
 function PickSource({ onPick }: { onPick: (c: CredentialType) => void }) {
-  const { width } = useWindowDimensions();
-  const tileW = (width - space.page * 2 - space[3]) / 2;
   return (
     <View style={{ gap: space[5] }}>
-      <Text variant="body">
+      <Text variant="bodySmall" style={{ fontSize: 15, lineHeight: 22 }}>
         Choose who should confirm your details. The credential is issued to this
         phone only.
       </Text>
-      <View style={s.grid}>
+      <View style={s.list}>
         {CATEGORY_ORDER.map((c, i) => {
           const m = categoryMeta(c);
           return (
             <Animated.View
               key={c}
-              entering={FadeInUp.delay(i * motion.stagger).duration(
-                motion.enter,
-              )}
+              entering={FadeInUp.delay(i * motion.stagger).duration(motion.enter)}
+              style={i > 0 ? s.listDivider : undefined}
             >
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${m.label}, issued by ${m.issuerName}`}
                 onPress={() => onPick(c)}
-                style={({ pressed }) => [
-                  s.tile,
-                  { width: tileW },
-                  pressed && {
-                    borderColor: m.color,
-                    backgroundColor: colors.overlay,
-                  },
-                ]}
+                style={({ pressed }) => [s.source, pressed && { backgroundColor: colors.overlay }]}
               >
-                <View style={[s.tileStrip, { backgroundColor: m.color }]} />
                 <View
                   style={[
-                    s.tileIcon,
-                    { backgroundColor: alpha(m.color, 0.15) },
+                    s.sourceIcon,
+                    { backgroundColor: alpha(m.color, 0.12), borderColor: alpha(m.color, 0.3) },
                   ]}
                 >
-                  <m.Icon size={28} color={m.color} strokeWidth={icon.stroke} />
+                  <m.Icon size={20} color={m.color} strokeWidth={icon.stroke} />
                 </View>
-                <View style={{ gap: 2 }}>
-                  <Text variant="eyebrow" color={m.color}>
-                    {m.label}
-                  </Text>
-                  <Text variant="label" numberOfLines={2}>
+                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                  <Text variant="label" numberOfLines={1}>
                     {m.issuerName}
                   </Text>
-                  <Text
-                    variant="bodySmall"
-                    style={{ fontSize: 12, lineHeight: 16 }}
-                    numberOfLines={2}
-                  >
+                  <Text variant="bodySmall" numberOfLines={1} color={m.color} style={{ fontSize: 12, lineHeight: 16 }}>
+                    {m.label}
+                  </Text>
+                  <Text variant="bodySmall" numberOfLines={2} style={{ fontSize: 13, lineHeight: 18, marginTop: 2 }}>
                     {SOURCE_HINT[c]}
                   </Text>
                 </View>
+                <ChevronRight size={18} color={colors.textFaint} strokeWidth={icon.stroke} />
               </Pressable>
             </Animated.View>
           );
@@ -716,7 +703,7 @@ function Success({
         entering={ZoomIn.delay(250).duration(300).springify().damping(18)}
       >
         <CredentialCard
-          width={width - space.page * 2}
+          width={Math.min(width - space.page * 2, MAX_CONTENT)}
           category={credential.type}
           status="valid"
           predicates={predicatesFor(credential.type)}
@@ -735,23 +722,27 @@ function Success({
 
 const s = StyleSheet.create({
   scroll: { flexGrow: 1, padding: space.page },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[3] },
-  tile: {
-    minHeight: 176,
+  list: {
     borderRadius: radius.card,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    padding: space[4],
-    paddingLeft: space[5],
-    gap: space[3],
     overflow: 'hidden',
   },
-  tileStrip: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
-  tileIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+  listDivider: { borderTopWidth: 1, borderTopColor: colors.borderSubtle },
+  source: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingHorizontal: space[4],
+    paddingVertical: space[4],
+    minHeight: 76,
+  },
+  sourceIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

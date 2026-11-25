@@ -27,15 +27,15 @@ const ROLES: { href: string; icon: LucideIcon; title: string; body: string; cta:
 export default function RoleSelectionPage() {
   return (
     <AuthFrame size="lg" title="How are you using NexusID?" description="Choose one. You can switch later.">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         {ROLES.map(({ href, icon: Icon, title, body, cta }) => (
           <Link
             key={href}
             href={href}
-            className="group flex flex-col gap-4 rounded-xl border border-border bg-background p-6 transition-colors hover:border-border-strong hover:bg-overlay focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="group flex flex-col gap-5 rounded-xl border border-border bg-surface p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03)] transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-border-strong sm:p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            <span className="flex size-12 items-center justify-center rounded-xl bg-overlay text-foreground group-hover:bg-surface">
-              <Icon className="size-6" strokeWidth={1.75} aria-hidden="true" />
+            <span className="flex size-10 items-center justify-center rounded-lg border border-border bg-overlay text-foreground">
+              <Icon className="size-5" strokeWidth={1.75} aria-hidden="true" />
             </span>
             <span className="space-y-1.5">
               <span className="block font-display text-lg font-semibold text-foreground">{title}</span>

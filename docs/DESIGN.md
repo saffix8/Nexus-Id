@@ -462,3 +462,20 @@ Build <SCR-0XX name> following docs/DESIGN.md §6.<n> and the references listed 
 Use the shadcn components and the signature components from §5, the states from §7 and the copy rules from §8.
 Wire it to <API-0XX…> from docs/REQUIREMENTS.md. Then open it in the browser, compare against the spec, and fix gaps.
 ```
+
+---
+
+## 12. v2.1 refinements (2026-11-26, UI polish pass)
+
+These override the matching lines above. Hex tokens are unchanged.
+
+- **No coloured left strips on cards.** Category colour now shows through a tinted icon emblem, label text and the card's radial glow. Applies to `CredentialCard` (web + mobile), requirements, landing issuers, add-credential sources.
+- **CredentialCard composition:** emblem + category label · status (top), issuer name in DM Sans 18–20 + "Verifiable credential · SD-JWT" with a small contact-chip graphic (middle), predicate chips (one row), mono `ID` / `EXP` footer under a hairline. No large icon tile.
+- **KPIs:** `StatGroup` — one bordered strip with hairline dividers (Stripe-style), 2 columns on phones, 3–4 on desktop. Semantic KPIs get a 6 px dot instead of an icon tile.
+- **Active nav:** `overlay` fill + 1 px border + accent-text icon (was a solid accent block). Accent fill stays for primary buttons and the mobile Scan button.
+- **Page headings:** every portal page uses `PageHeader` (title, one line, actions). The top bar is a breadcrumb (`Wallet / History`), never a second title.
+- **Responsive web:** grids are `grid-cols-1` first (`minmax(0,1fr)`), so long text can't widen the page. Tables collapse on phones (log table → stacked rows; secondary columns hidden below `sm`/`md`/`lg`). Content max width 1200 px, 1360 px from `2xl`. Checked at 360, 390, 768, 1024, 1280 and 1920 px with no horizontal scroll.
+- **Mobile tab bar:** Wallet · **Scan** · History · Profile. Scan is an accent pill **inside** the bar, never floating over content.
+- **Mobile layout:** `src/styles/layout.ts` `useLayout()` → `compact` (≤ 360 dp wide or < 700 dp tall), `wide` (≥ 600 dp: content capped at 520 dp and centred). Checked at 360×640, 411×914 and 800×1280 dp.
+- **ConsentSheet:** buttons stack (Approve full width on top) below 400 dp; the sheet scrolls if it is taller than the screen.
+- **Profile:** grouped settings rows, not a stack of buttons.

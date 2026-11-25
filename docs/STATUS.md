@@ -1,3 +1,25 @@
+# ▶ UI polish pass (2026-11-26) — committed
+
+Web + mobile visual pass for the first evaluation. Design rules recorded in `docs/DESIGN.md` §12.
+
+- **Web:** shared `PageHeader`, breadcrumb top bar, `StatGroup` KPI strip, responsive `LiveLogTable` / history / API-key tables,
+  redesigned `CredentialCard`, landing page reworked (steps timeline, joined issuer grid), auth pages without nested cards,
+  SP chart → stacked daily bars. Fixed 68 px horizontal overflow on phones (`/dashboard`, `/dashboard/devices`).
+  Verified with headless Chrome at 360–1920 px: no overflow, no console errors. `tsc` clean, `next build` passes.
+- **Mobile:** Scan docked in the tab bar (was floating over content), `useLayout()` responsive helper, new card, Profile as
+  settings rows, Add credential as rows, paste-code screen padding, ConsentSheet stacks buttons < 400 dp, proof screen buttons
+  in normal flow. **Bug fixed:** `Button` lost its fill (Reanimated 4 ignores style functions on animated Pressable) — buttons
+  showed as bare text. **Crash fixed:** `MainActivity.onCreate(null)` (react-native-screens) — the app crashed on launch
+  whenever Android recreated the activity (process death, display/density change). APK rebuilt and installed.
+- **Not verified live:** the ConsentSheet / proof screens with a real request (needs the extension flow). Walk step 7–9 once.
+- A throwaway web account `ui.review@nexusid.demo` was registered for screenshots; delete it if you want a clean DB.
+- New files: `apps/web/components/nexus/PageHeader.tsx`, `apps/mobile/src/styles/layout.ts`.
+- Native change (`MainActivity.kt`) is in the installed APK. After pulling on another machine, rebuild:
+  `bash apps/mobile/scripts/build-apk.sh install`.
+
+**Next before the evaluation:** `npm run demo:reset` → walk demo steps 1–12 (DEMO_BUILD.md §1), watching the phone
+approve sheet and proof screens on the emulator, since those weren't exercised with a live request in this pass.
+
 # ▶ RESUME HERE (updated 2026-11-25, Phase 8)
 
 **Where we are:** Phases 0 → 7 done. **Phase 8 (polish) code complete, NOT complete:** the §1 demo-story walkthrough

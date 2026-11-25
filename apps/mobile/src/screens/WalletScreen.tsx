@@ -17,10 +17,10 @@ import { CredentialCard, CARD_RATIO } from '../components/CredentialCard';
 import { CATEGORY_ORDER, categoryMeta, predicatesFor } from '../lib/category';
 import { credentialStatus } from '../lib/wallet';
 import type { RootStackParamList } from '../navigation/types';
-import { useTabBarHeight } from '../navigation/TabBar';
 import { useCredentialsStore } from '../store/credentials.store';
 import { useSessionStore } from '../store/session.store';
 import { alpha, colors, icon, motion, radius, space } from '../styles/tokens';
+import { MAX_CONTENT } from '../styles/layout';
 import {
   EmptyState,
   ErrorState,
@@ -36,9 +36,9 @@ const STACK_OFFSET = 72; // each next card shifted 72 px down (§5.1)
 export function WalletScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { width } = useWindowDimensions();
-  const cardWidth = width - space.page * 2;
+  const cardWidth = Math.min(width - space.page * 2, MAX_CONTENT);
   const cardHeight = cardWidth / CARD_RATIO;
-  const bottomPad = useTabBarHeight() + 56 + space[8];
+  const bottomPad = space[8];
 
   const { credentials, revoked, loaded, loading, error, loadCredentials } =
     useCredentialsStore();

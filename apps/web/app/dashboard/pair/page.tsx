@@ -127,7 +127,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="space-y-4 p-6 shadow-none">
+    <Card className="space-y-4 p-6">
       <span
         className={
           "flex size-12 items-center justify-center rounded-xl border " +
@@ -166,7 +166,7 @@ export default function ApproveQrPage() {
   return (
     <div className="mx-auto max-w-md space-y-6">
       {state.kind === "loading" && (
-        <Card className="h-48 animate-pulse shadow-none" aria-busy="true" />
+        <Card className="h-48 animate-pulse" aria-busy="true" />
       )}
 
       {state.kind === "missing" && (

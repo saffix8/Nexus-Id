@@ -31,7 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState, ErrorState } from "@/components/nexus";
+import { EmptyState, ErrorState, PageHeader } from "@/components/nexus";
 import {
   NEVER_SHARED,
   PRIVACY_LINE,
@@ -242,12 +242,12 @@ function RequestCard({
   return (
     <Card
       className={cn(
-        "overflow-hidden shadow-none transition-opacity",
+        "overflow-hidden transition-opacity",
         expired && "opacity-60",
       )}
     >
       {/* Who is asking */}
-      <div className="flex items-start gap-3 p-5">
+      <div className="flex items-start gap-3 p-4 sm:p-5">
         <span
           className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-overlay font-display text-base font-semibold text-foreground"
           aria-hidden="true"
@@ -276,12 +276,12 @@ function RequestCard({
         )}
       </div>
 
-      <p className="border-t border-border-subtle px-5 py-3 text-sm text-text-muted">
+      <p className="border-t border-border-subtle px-4 sm:px-5 py-3 text-sm text-text-muted">
         {request.verifierName} wants to confirm {predicateSentence(predicate)}.
       </p>
 
       {/* Will be confirmed */}
-      <div className="border-t border-border-subtle px-5 py-4">
+      <div className="border-t border-border-subtle px-4 sm:px-5 py-4">
         <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted">
           Will be confirmed
         </p>
@@ -308,7 +308,7 @@ function RequestCard({
       </div>
 
       {/* Never shared */}
-      <div className="border-t border-border-subtle px-5 py-4">
+      <div className="border-t border-border-subtle px-4 sm:px-5 py-4">
         <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted">
           Never shared
         </p>
@@ -323,7 +323,7 @@ function RequestCard({
       </div>
 
       {/* Using / missing credential */}
-      <div className="border-t border-border-subtle px-5 py-3 text-xs text-text-muted">
+      <div className="border-t border-border-subtle px-4 sm:px-5 py-3 text-xs text-text-muted">
         {candidate ? (
           <>
             Using: {meta.label} · {candidate.issuerName} · exp{" "}
@@ -354,13 +354,13 @@ function RequestCard({
       {error && (
         <p
           role="alert"
-          className="mx-5 mb-1 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger"
+          className="mx-4 mb-1 sm:mx-5 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger"
         >
           {error.message}
         </p>
       )}
 
-      <div className="flex gap-3 p-5 pt-3">
+      <div className="flex flex-col-reverse gap-2 p-4 pt-3 min-[420px]:flex-row min-[420px]:gap-3 sm:p-5 sm:pt-3">
         {expired ? (
           <Button variant="outline" className="flex-1" onClick={refresh}>
             Close
@@ -433,14 +433,14 @@ export default function RequestsPage() {
   const held = wallet.data ?? [];
 
   return (
-    <div className="space-y-6">
-      <p className="max-w-2xl text-sm text-text-muted">
-        Requests from websites open in your paired browser. Nothing is shared
-        until you approve. {PRIVACY_LINE}
-      </p>
+    <div className="space-y-6 sm:space-y-8">
+      <PageHeader
+        title="Requests"
+        description={<>Requests from websites open in your paired browser. Nothing is shared until you approve. {PRIVACY_LINE}</>}
+      />
 
       {pending.isPending || now === null ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 xl:grid-cols-2">
           <Skeleton className="h-[360px] rounded-xl" />
         </div>
       ) : pending.isError ? (
@@ -458,7 +458,7 @@ export default function RequestsPage() {
           action={{ label: "View history", href: "/dashboard/history" }}
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-4 sm:gap-5 xl:grid-cols-2">
           {pending.data.map((req) => (
             <RequestCard
               key={req.requestId}

@@ -16,7 +16,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  CATEGORY_DISPLAY,
   PREDICATE_DISPLAY,
   type CredentialType,
   type PredicateCode,
@@ -98,11 +97,11 @@ function SectionHeading({
   return (
     <div className="max-w-2xl">
       <Eyebrow>{eyebrow}</Eyebrow>
-      <h2 className="mt-3 font-display text-3xl font-semibold tracking-[-0.02em] text-foreground md:text-4xl">
+      <h2 className="mt-3 font-display text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground sm:text-3xl md:text-4xl">
         {title}
       </h2>
       {body && (
-        <p className="mt-4 text-base leading-relaxed text-text-muted">{body}</p>
+        <p className="mt-4 text-[15px] leading-relaxed text-text-muted sm:text-base">{body}</p>
       )}
     </div>
   );
@@ -112,9 +111,9 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* ── Nav ─────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-border-subtle bg-background/80 backdrop-blur-sm">
+      <header className="sticky top-0 z-30 border-b border-border-subtle bg-background/85 backdrop-blur-md">
         <nav
-          className="mx-auto flex h-16 max-w-[1200px] items-center gap-8 px-6"
+          className="mx-auto flex h-16 max-w-[1200px] items-center gap-8 px-4 sm:px-6"
           aria-label="Main"
         >
           <Link
@@ -157,7 +156,10 @@ export default function LandingPage() {
               <Link href="/login">Sign in</Link>
             </Button>
             <Button asChild size="sm">
-              <Link href="/auth/provider-register">Start verifying</Link>
+              <Link href="/auth/provider-register">
+                <span className="sm:hidden">Verify users</span>
+                <span className="hidden sm:inline">Start verifying</span>
+              </Link>
             </Button>
           </div>
         </nav>
@@ -165,27 +167,23 @@ export default function LandingPage() {
 
       <main>
         {/* ── Hero ──────────────────────────────────────────────────────── */}
-        <section className="mx-auto grid max-w-[1200px] items-center gap-16 px-6 pb-24 pt-20 md:pt-28 lg:grid-cols-[1.1fr_1fr]">
+        <section className="mx-auto grid max-w-[1200px] items-center gap-12 px-4 pb-16 pt-14 sm:px-6 md:gap-16 md:pb-24 md:pt-24 lg:grid-cols-[1.3fr_1fr] lg:pt-28">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-text-muted">
-              <ShieldCheck
-                className="size-3.5 text-success"
-                strokeWidth={1.75}
-                aria-hidden="true"
-              />
-              SD-JWT selective disclosure · RFC 9901
-            </span>
-            <h1 className="mt-6 font-display text-5xl font-bold leading-[1.05] tracking-[-0.03em] text-foreground md:text-6xl">
+            <p className="flex items-center gap-2 font-mono text-xs text-text-muted">
+              <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+              Selective disclosure · SD-JWT · RFC 9901
+            </p>
+            <h1 className="mt-5 font-display text-[40px] font-bold leading-[1.04] tracking-[-0.035em] text-foreground [text-wrap:wrap] sm:text-5xl lg:text-[56px] xl:text-[64px]">
               Prove what matters.
               <br />
               <span className="text-text-muted">Hide what doesn&apos;t.</span>
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-text-muted">
+            <p className="mt-6 max-w-xl text-base leading-relaxed text-text-muted sm:text-lg">
               NexusID lets you prove you are over 18, hold a degree or study at
               a university, without handing a website your CNIC. Websites get a
               signed answer. Your data stays on your phone.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
+            <div className="mt-8 flex flex-col gap-3 min-[420px]:flex-row min-[420px]:flex-wrap min-[420px]:items-center">
               <Button asChild size="lg">
                 <Link href="/auth/login">
                   Open your wallet
@@ -200,9 +198,19 @@ export default function LandingPage() {
                 <a href="#verifiers">I verify users</a>
               </Button>
             </div>
-            <p className="mt-6 text-sm text-text-muted">
-              Only the answer is shared. Never your data.
-            </p>
+            <dl className="mt-10 grid max-w-md grid-cols-3 gap-6 border-t border-border-subtle pt-6">
+              {[
+                ["0", "documents uploaded"],
+                ["1", "answer per request"],
+                ["120 s", "proof window"],
+              ].map(([k, v]) => (
+                <div key={v}>
+                  <dt className="sr-only">{v}</dt>
+                  <dd className="num font-display text-xl font-semibold text-foreground">{k}</dd>
+                  <dd className="mt-0.5 text-xs leading-snug text-text-muted">{v}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
           <HeroCredential />
         </section>
@@ -212,7 +220,7 @@ export default function LandingPage() {
           className="border-t border-border-subtle"
           aria-labelledby="compare-title"
         >
-          <div className="mx-auto max-w-[1200px] px-6 py-24">
+          <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 md:py-24">
             <div id="compare-title">
               <SectionHeading
                 eyebrow="Why it matters"
@@ -220,8 +228,8 @@ export default function LandingPage() {
                 body="To check your age, websites ask for a photo of your CNIC and keep it. NexusID replaces the upload with a proof of the one condition they need."
               />
             </div>
-            <div className="mt-12 grid gap-4 md:grid-cols-2">
-              <article className="rounded-xl border border-border bg-surface p-6">
+            <div className="mt-10 grid grid-cols-1 gap-4 md:mt-12 md:grid-cols-2">
+              <article className="rounded-xl border border-border bg-surface p-5 sm:p-6">
                 <div className="flex items-center gap-2 text-text-muted">
                   <Ban
                     className="size-4"
@@ -237,7 +245,8 @@ export default function LandingPage() {
                       className="flex items-center justify-between text-sm"
                     >
                       <span className="text-foreground">{item}</span>
-                      <span className="text-xs text-danger">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-danger">
+                        <span className="size-1 rounded-full bg-danger" aria-hidden="true" />
                         Shared and stored
                       </span>
                     </li>
@@ -249,7 +258,7 @@ export default function LandingPage() {
                 </p>
               </article>
 
-              <article className="rounded-xl border border-success/25 bg-surface p-6">
+              <article className="rounded-xl border border-success/25 bg-surface p-5 sm:p-6">
                 <div className="flex items-center gap-2 text-success">
                   <ShieldCheck
                     className="size-4"
@@ -307,35 +316,36 @@ export default function LandingPage() {
           id="how"
           className="scroll-mt-16 border-t border-border-subtle"
         >
-          <div className="mx-auto max-w-[1200px] px-6 py-24">
+          <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 md:py-24">
             <SectionHeading
               eyebrow="How it works"
               title="Three steps, a few seconds"
             />
-            <ol className="mt-12 grid gap-4 md:grid-cols-3">
+            <ol className="mt-10 grid grid-cols-1 gap-0 md:mt-14 md:grid-cols-3 md:gap-10">
               {STEPS.map((step, i) => (
                 <li
                   key={step.title}
-                  className="rounded-xl border border-border bg-surface p-6"
+                  className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-x-4 pb-10 last:pb-0 md:block md:pb-0"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="flex size-10 items-center justify-center rounded-lg bg-overlay text-foreground">
-                      <step.icon
-                        className="size-5"
-                        strokeWidth={1.75}
-                        aria-hidden="true"
-                      />
-                    </span>
-                    <span className="font-mono text-xs text-text-muted">
-                      0{i + 1}
-                    </span>
+                  {/* connector: vertical on phones, horizontal from md */}
+                  {i < STEPS.length - 1 && (
+                    <>
+                      <span className="absolute bottom-0 left-[17.5px] top-10 w-px bg-border md:hidden" aria-hidden="true" />
+                      <span className="absolute left-12 right-[-28px] top-[18px] hidden h-px bg-border md:block" aria-hidden="true" />
+                    </>
+                  )}
+                  <span className="relative z-10 flex size-9 items-center justify-center rounded-full border border-border-strong bg-background text-foreground">
+                    <step.icon className="size-4" strokeWidth={1.75} aria-hidden="true" />
+                  </span>
+                  <div className="md:mt-6">
+                    <p className="num font-mono text-xs text-text-muted">Step {i + 1}</p>
+                    <h3 className="mt-1.5 font-display text-lg font-semibold text-foreground">
+                      {step.title}
+                    </h3>
+                    <p className="mt-2 max-w-sm text-sm leading-relaxed text-text-muted">
+                      {step.body}
+                    </p>
                   </div>
-                  <h3 className="mt-5 font-display text-base font-semibold text-foreground">
-                    {step.title}
-                  </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-text-muted">
-                    {step.body}
-                  </p>
                 </li>
               ))}
             </ol>
@@ -347,50 +357,39 @@ export default function LandingPage() {
           id="issuers"
           className="scroll-mt-16 border-t border-border-subtle"
         >
-          <div className="mx-auto max-w-[1200px] px-6 py-24">
+          <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 md:py-24">
             <SectionHeading
               eyebrow="Issuers"
               title="Credentials from the sources that already know you"
               body="Each issuer signs its credential with its own key. Websites check that signature, not a copy of your documents."
             />
-            <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-10 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 md:mt-12 lg:grid-cols-4">
               {CATEGORY_ORDER.map((category) => {
                 const meta = categoryMeta(category);
                 return (
-                  <article
-                    key={category}
-                    className="relative overflow-hidden rounded-xl border border-border bg-surface p-5 pl-6"
-                  >
-                    <span
-                      className="absolute inset-y-0 left-0 w-1"
-                      style={{ background: CATEGORY_DISPLAY[category].color }}
-                      aria-hidden="true"
-                    />
-                    <span
-                      className={`flex size-10 items-center justify-center rounded-lg border ${meta.tint}`}
-                    >
-                      <meta.Icon
-                        className="size-5"
-                        strokeWidth={1.75}
-                        aria-hidden="true"
-                      />
-                    </span>
-                    <p
-                      className={`mt-5 text-[11px] font-medium uppercase tracking-[0.08em] ${meta.text}`}
-                    >
-                      {meta.label}
-                    </p>
-                    <h3 className="mt-1 font-display text-base font-semibold text-foreground">
+                  <article key={category} className="flex flex-col bg-surface p-5 sm:p-6">
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`flex size-9 items-center justify-center rounded-lg border ${meta.tint}`}
+                      >
+                        <meta.Icon className="size-[18px]" strokeWidth={1.75} aria-hidden="true" />
+                      </span>
+                      <span className="font-mono text-[11px] text-text-faint">
+                        {predicatesFor(category).length} condition{predicatesFor(category).length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <h3 className="mt-6 font-display text-base font-semibold text-foreground">
                       {meta.issuerName}
                     </h3>
-                    <ul className="mt-4 space-y-1.5">
+                    <p className={`mt-0.5 text-xs ${meta.text}`}>{meta.label}</p>
+                    <ul className="mt-5 space-y-2 border-t border-border-subtle pt-4">
                       {predicatesFor(category).map((code) => (
                         <li
                           key={code}
                           className="flex items-center gap-2 text-sm text-text-muted"
                         >
                           <CircleCheck
-                            className="size-3.5 shrink-0"
+                            className="size-3.5 shrink-0 text-text-faint"
                             strokeWidth={1.75}
                             aria-hidden="true"
                           />
@@ -410,7 +409,7 @@ export default function LandingPage() {
           id="verifiers"
           className="scroll-mt-16 border-t border-border-subtle"
         >
-          <div className="mx-auto grid max-w-[1200px] items-start gap-12 px-6 py-24 lg:grid-cols-[1fr_1.3fr]">
+          <div className="mx-auto grid max-w-[1200px] grid-cols-1 items-start gap-10 px-4 py-16 sm:px-6 md:py-24 lg:grid-cols-[1fr_1.3fr] lg:gap-12">
             <div>
               <SectionHeading
                 eyebrow="For verifiers"
@@ -464,12 +463,18 @@ export default function LandingPage() {
 
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <footer className="border-t border-border-subtle">
-        <div className="mx-auto flex max-w-[1200px] flex-col gap-4 px-6 py-10 text-sm text-text-muted md:flex-row md:items-center md:justify-between">
+        <div className="mx-auto flex max-w-[1200px] flex-col gap-6 px-4 py-10 text-sm text-text-muted sm:px-6 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2.5">
             <LogoMark className="size-6 text-xs" />
-            <span>NexusID</span>
+            <span className="font-medium text-foreground">NexusID</span>
+            <span className="text-text-faint">·</span>
+            <span>Only the answer is shared.</span>
           </div>
-          <p>Air University Islamabad · FYP 2026</p>
+          <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">
+            <Link href="/auth/login" className="hover:text-foreground">Wallet sign-in</Link>
+            <Link href="/auth/provider-login" className="hover:text-foreground">Provider sign-in</Link>
+            <span>Air University Islamabad · FYP 2026</span>
+          </nav>
         </div>
       </footer>
     </div>

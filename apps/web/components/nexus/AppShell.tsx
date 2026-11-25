@@ -123,7 +123,7 @@ export function LogoMark({ className }: { className?: string }) {
   return (
     <span
       className={
-        "flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-base font-bold text-white " +
+        "flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary font-display text-base font-bold text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] " +
         (className ?? "")
       }
       aria-hidden="true"
@@ -150,7 +150,7 @@ export function AppShell({ area, user, title: titleOverride, actions, children }
                   <LogoMark />
                   <span className="grid flex-1 text-left leading-tight">
                     <span className="truncate font-display text-sm font-semibold">{cfg.name}</span>
-                    <span className="truncate text-xs text-text-muted">{cfg.tag}</span>
+                    <span className="truncate text-xs text-text-muted">{cfg.tag} portal</span>
                   </span>
                 </Link>
               </SidebarMenuButton>
@@ -159,9 +159,9 @@ export function AppShell({ area, user, title: titleOverride, actions, children }
         </SidebarHeader>
 
         <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-[11px] uppercase tracking-[0.08em]">Menu</SidebarGroupLabel>
-            <SidebarMenu>
+          <SidebarGroup className="pt-1">
+            <SidebarGroupLabel className="sr-only">Navigation</SidebarGroupLabel>
+            <SidebarMenu className="gap-0.5">
               {cfg.nav.map((item) => {
                 const active = isActive(pathname, item.href, cfg.home);
                 return (
@@ -170,7 +170,7 @@ export function AppShell({ area, user, title: titleOverride, actions, children }
                       asChild
                       isActive={active}
                       tooltip={item.label}
-                      className="text-text-muted hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-white"
+                      className="h-9 text-text-muted transition-colors hover:bg-overlay hover:text-foreground data-[active=true]:bg-overlay data-[active=true]:font-medium data-[active=true]:text-foreground data-[active=true]:shadow-[inset_0_0_0_1px_hsl(var(--border))] [&>svg]:size-[18px] data-[active=true]:[&>svg]:text-accent-text"
                     >
                       <Link href={item.href} aria-current={active ? "page" : undefined}>
                         <item.icon strokeWidth={1.75} aria-hidden="true" />
@@ -191,14 +191,23 @@ export function AppShell({ area, user, title: titleOverride, actions, children }
       </Sidebar>
 
       <SidebarInset className="min-w-0 bg-background">
-        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-border-subtle bg-background/80 px-4 backdrop-blur-sm">
-          <SidebarTrigger className="-ml-1 text-text-muted hover:text-foreground" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <h1 className="font-display text-base font-semibold tracking-[-0.01em] text-foreground">{title}</h1>
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border-subtle bg-background/85 px-4 backdrop-blur-md sm:px-6">
+          <SidebarTrigger className="-ml-1.5 size-8 text-text-muted hover:text-foreground" />
+          <Link href={cfg.home} className="flex items-center md:hidden" aria-label={`${cfg.name} home`}>
+            <LogoMark className="size-7 text-sm" />
+          </Link>
+          <Separator orientation="vertical" className="h-4 bg-border" />
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm">
+            <span className="hidden text-text-muted sm:inline">{cfg.tag}</span>
+            <span className="hidden text-text-faint sm:inline" aria-hidden="true">/</span>
+            <span className="truncate font-medium text-foreground" aria-current="page">{title}</span>
+          </nav>
           {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
         </header>
         {/* SidebarInset is the <main> landmark; this is just the padded column. */}
-        <div className="mx-auto w-full max-w-[1200px] flex-1 p-4 md:p-8">{children}</div>
+        <div className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-10 2xl:max-w-[1360px]">
+          {children}
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

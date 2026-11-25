@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/nexus/EmptyState";
+import { PageHeader } from "@/components/nexus/PageHeader";
 import { ErrorState } from "@/components/nexus/ErrorState";
 import {
   OutcomeBadge,
@@ -139,15 +140,10 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">
-            History
-          </h2>
-          <p className="text-sm text-text-muted">
-            Every request routed to you. The same list shows on your phone.
-          </p>
-        </div>
+      <PageHeader
+        title="History"
+        description="Every request routed to you. The same list shows on your phone."
+        actions={
         <Button
           variant="ghost"
           className="gap-1.5 text-danger hover:bg-danger/10 hover:text-danger"
@@ -157,10 +153,11 @@ export default function HistoryPage() {
           <Trash2 className="size-4" strokeWidth={1.75} aria-hidden="true" />
           Clear all
         </Button>
-      </div>
+        }
+      />
 
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
-        <TabsList>
+        <TabsList className="scrollbar-none max-w-full justify-start overflow-x-auto">
           {FILTERS.map((f) => (
             <TabsTrigger key={f.value} value={f.value} className="gap-1.5">
               {f.label}
@@ -174,7 +171,7 @@ export default function HistoryPage() {
         </TabsList>
       </Tabs>
 
-      <Card className="overflow-hidden shadow-none">
+      <Card className="overflow-hidden">
         {history.isLoading ? (
           <div className="space-y-3 p-5" aria-busy="true">
             {[0, 1, 2, 3].map((i) => (
@@ -208,9 +205,9 @@ export default function HistoryPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Platform</TableHead>
-                <TableHead>Condition</TableHead>
+                <TableHead className="hidden sm:table-cell">Condition</TableHead>
                 <TableHead>Outcome</TableHead>
-                <TableHead>When</TableHead>
+                <TableHead className="hidden md:table-cell">When</TableHead>
                 <TableHead className="w-12">
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -241,12 +238,17 @@ export default function HistoryPage() {
                       >
                         {e.verifierName.trim()[0]?.toUpperCase() ?? "?"}
                       </span>
-                      <span className="font-medium text-foreground">
-                        {e.verifierName}
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-foreground">
+                          {e.verifierName}
+                        </span>
+                        <span className="num block text-xs text-text-muted md:hidden">
+                          {now === null ? "…" : relative(e.created_at, now)}
+                        </span>
                       </span>
                     </button>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <PredicateChip code={e.predicate} />
                   </TableCell>
                   <TableCell>
@@ -254,7 +256,7 @@ export default function HistoryPage() {
                       state={outcomeStateFromVerification(e.outcome)}
                     />
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-text-muted">
+                  <TableCell className="num hidden whitespace-nowrap text-text-muted md:table-cell">
                     {now === null ? "…" : relative(e.created_at, now)}
                   </TableCell>
                   <TableCell>

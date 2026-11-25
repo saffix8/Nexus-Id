@@ -62,9 +62,9 @@ export function PairedDevices({ now, showPairLink = true }: { now: number | null
   }
 
   return (
-    <Card className="flex flex-col shadow-none">
-      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5">
-        <div className="space-y-1">
+    <Card className="flex flex-col">
+      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-4 sm:p-5">
+        <div className="min-w-0 space-y-1">
           <h3 className="font-display text-base font-semibold text-foreground">
             Paired browsers & devices
           </h3>
@@ -80,7 +80,7 @@ export function PairedDevices({ now, showPairLink = true }: { now: number | null
       </div>
 
       {/* Your phone — the device key every proof is signed with */}
-      <div className="flex items-center gap-3 border-b border-border-subtle px-5 py-4">
+      <div className="flex items-center gap-3 border-b border-border-subtle px-4 py-4 sm:px-5">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay text-text-muted">
           <Smartphone
             className="size-4"
@@ -95,9 +95,6 @@ export function PairedDevices({ now, showPairLink = true }: { now: number | null
             <>
               <p className="truncate text-sm font-medium text-foreground">
                 {me.data?.deviceName ?? "Your phone"}
-                <span className="ml-2 text-xs font-normal text-text-muted">
-                  this account&apos;s device key
-                </span>
               </p>
               <p className="text-xs text-text-muted">
                 {me.data?.publicKey
@@ -141,7 +138,7 @@ export function PairedDevices({ now, showPairLink = true }: { now: number | null
             return (
               <li
                 key={p.pairingId}
-                className="flex items-center gap-3 px-5 py-3.5"
+                className="flex items-center gap-3 px-4 py-3.5 sm:px-5"
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay text-text-muted">
                   <Monitor
@@ -200,7 +197,7 @@ export function PairedDevices({ now, showPairLink = true }: { now: number | null
       )}
 
       {revoked.length > 0 && !pairings.isError && (
-        <div className="mt-auto border-t border-border-subtle px-5 py-3">
+        <div className="mt-auto border-t border-border-subtle px-4 py-3 sm:px-5">
           <button
             type="button"
             onClick={() => setShowRevoked((v) => !v)}

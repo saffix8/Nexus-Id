@@ -7,12 +7,9 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import {
-  Activity,
   ArrowRight,
-  CircleCheck,
-  CircleX,
   ListChecks,
   Percent,
   TriangleAlert,
@@ -31,7 +28,9 @@ import {
   ErrorState,
   LiveLogTable,
   PredicateChip,
+  PageHeader,
   StatCard,
+  StatGroup,
 } from "@/components/nexus";
 import { VerifierIntegrationCode } from "@/components/VerifierIntegrationCode";
 import {
@@ -54,7 +53,19 @@ export default function ProviderDashboardPage() {
   const snippetPredicate = configured.find(isPredicateCode) ?? "AGE_OVER_18";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 sm:space-y-8">
+      <PageHeader
+        title="Overview"
+        description="Every verification your site has opened. You only ever see the outcome, never the person's data."
+        actions={
+          <Button asChild variant="secondary" size="sm" className="gap-1.5">
+            <Link href="/verifier/integration">
+              Integration guide
+              <ArrowRight className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+            </Link>
+          </Button>
+        }
+      />
       {requirements.isSuccess && configured.length === 0 && (
         <div className="flex flex-col gap-3 rounded-xl border border-warning/25 bg-warning/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-start gap-2.5 text-sm text-warning">
@@ -84,27 +95,24 @@ export default function ProviderDashboardPage() {
           retrying={stats.isFetching}
         />
       ) : (
-        <section
-          aria-label="Totals"
-          className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-        >
+        <StatGroup cols={4}>
           <StatCard
             label="Total verifications"
-            icon={Activity}
+            tone="accent"
             value={s && nf.format(s.total)}
             loading={stats.isPending}
             hint={s && s.pending > 0 ? `${s.pending} pending now` : "All time"}
           />
           <StatCard
             label="Verified"
-            icon={CircleCheck}
+            tone="success"
             value={s && nf.format(s.verified)}
             loading={stats.isPending}
             hint="Condition confirmed"
           />
           <StatCard
-            label="Failed · Declined · Expired"
-            icon={CircleX}
+            label="Not met"
+            tone="danger"
             value={notMet === undefined ? undefined : nf.format(notMet)}
             loading={stats.isPending}
             hint={
@@ -123,12 +131,12 @@ export default function ProviderDashboardPage() {
                 : undefined
             }
             loading={stats.isPending}
-            hint="Verified out of decided sessions"
+            hint="Of decided sessions"
           />
-        </section>
+        </StatGroup>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="min-w-0 space-y-6 xl:col-span-2">
           <VolumeChart
             data={s?.daily}
@@ -154,7 +162,7 @@ export default function ProviderDashboardPage() {
         </div>
 
         <aside className="min-w-0 space-y-6">
-          <Card className="space-y-4 p-5 shadow-none">
+          <Card className="space-y-4 p-4 sm:p-5">
             <div className="space-y-1">
               <h2 className="font-display text-base font-semibold text-foreground">
                 Integrate in 2 minutes
@@ -181,7 +189,7 @@ export default function ProviderDashboardPage() {
             </Link>
           </Card>
 
-          <Card className="space-y-3 p-5 shadow-none">
+          <Card className="space-y-3 p-4 sm:p-5">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-base font-semibold text-foreground">
                 Conditions you verify
@@ -261,7 +269,7 @@ function VolumeChart({
     rows !== undefined && rows.every((r) => r.verified === 0 && r.notMet === 0);
 
   return (
-    <Card className="p-5 shadow-none">
+    <Card className="p-4 sm:p-5">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
         <h2 className="font-display text-base font-semibold text-foreground">
           Verifications, last 7 days
@@ -284,83 +292,60 @@ function VolumeChart({
         </div>
       </div>
       {loading || !rows ? (
-        <Skeleton className="h-[200px] w-full" />
+        <Skeleton className="h-[180px] w-full sm:h-[220px]" />
       ) : (
         <div className="relative">
           <ChartContainer
             config={chartConfig}
-            className="aspect-auto h-[200px] w-full"
+            className="aspect-auto h-[180px] w-full sm:h-[220px]"
           >
-            <AreaChart
+            <BarChart
               data={rows}
-              margin={{ left: 0, right: 8, top: 8, bottom: 0 }}
+              margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+              barCategoryGap="36%"
+              maxBarSize={36}
             >
-              <defs>
-                <linearGradient id="fillVerified" x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="5%"
-                    stopColor="var(--color-verified)"
-                    stopOpacity={0.3}
-                  />
-                  <stop
-                    offset="95%"
-                    stopColor="var(--color-verified)"
-                    stopOpacity={0}
-                  />
-                </linearGradient>
-                <linearGradient id="fillNotMet" x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="5%"
-                    stopColor="var(--color-notMet)"
-                    stopOpacity={0.2}
-                  />
-                  <stop
-                    offset="95%"
-                    stopColor="var(--color-notMet)"
-                    stopOpacity={0}
-                  />
-                </linearGradient>
-              </defs>
               <CartesianGrid
                 vertical={false}
                 stroke="hsl(var(--border))"
-                strokeDasharray="3 3"
+                strokeOpacity={0.6}
               />
               <XAxis
                 dataKey="day"
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
+                interval="preserveStartEnd"
+                tick={{ fontSize: 11 }}
               />
               <YAxis
                 allowDecimals={false}
                 tickLine={false}
                 axisLine={false}
-                width={28}
+                width={24}
+                tick={{ fontSize: 11 }}
               />
               <ChartTooltip
-                cursor={false}
+                cursor={{ fill: "hsl(var(--muted))", opacity: 0.5 }}
                 content={<ChartTooltipContent indicator="dot" />}
               />
-              <Area
-                dataKey="notMet"
-                stackId="v"
-                isAnimationActive={false}
-                type="monotone"
-                stroke="var(--color-notMet)"
-                fill="url(#fillNotMet)"
-                strokeWidth={1.5}
-              />
-              <Area
+              <Bar
                 dataKey="verified"
                 stackId="v"
                 isAnimationActive={false}
-                type="monotone"
-                stroke="var(--color-verified)"
-                fill="url(#fillVerified)"
-                strokeWidth={2}
+                fill="var(--color-verified)"
+                fillOpacity={0.8}
+                radius={[0, 0, 2, 2]}
               />
-            </AreaChart>
+              <Bar
+                dataKey="notMet"
+                stackId="v"
+                isAnimationActive={false}
+                fill="var(--color-notMet)"
+                fillOpacity={0.7}
+                radius={[3, 3, 0, 0]}
+              />
+            </BarChart>
           </ChartContainer>
           {empty && (
             <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-text-muted">

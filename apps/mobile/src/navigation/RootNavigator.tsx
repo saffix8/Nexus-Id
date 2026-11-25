@@ -10,7 +10,7 @@ import { useSessionStore } from '../store/session.store';
 import { useHistoryStore } from '../store/history.store';
 import { colors, timing } from '../styles/tokens';
 import { navigationRef } from './navigationRef';
-import { ScanFab, TabBar } from './TabBar';
+import { TabBar } from './TabBar';
 import type { RootStackParamList, TabParamList } from './types';
 import { SignInScreen } from '../screens/SignInScreen';
 import { LockScreen } from '../screens/LockScreen';
@@ -43,7 +43,6 @@ function Tabs() {
         <Tab.Screen name="History" component={HistoryScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
-      <ScanFab />
     </View>
   );
 }

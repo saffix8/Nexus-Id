@@ -20,12 +20,12 @@ interface EmptyStateProps {
 
 export function EmptyState({ icon: Icon, title, description, action, bare, className }: EmptyStateProps) {
   const body = (
-    <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
-      <span className="mb-5 flex size-16 items-center justify-center rounded-2xl border border-border bg-overlay text-text-muted">
-        <Icon className="size-10" strokeWidth={1.75} aria-hidden="true" />
+    <div className="flex flex-col items-center justify-center px-6 py-12 text-center sm:py-14">
+      <span className="mb-4 flex size-12 items-center justify-center rounded-xl border border-border bg-overlay text-text-muted shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+        <Icon className="size-5" strokeWidth={1.75} aria-hidden="true" />
       </span>
-      <h3 className="mb-1.5 font-display text-base font-semibold text-foreground">{title}</h3>
-      <p className="mb-6 max-w-sm text-sm leading-relaxed text-text-muted">{description}</p>
+      <h3 className="mb-1 font-display text-[15px] font-semibold text-foreground">{title}</h3>
+      <p className="mb-5 max-w-xs text-sm leading-relaxed text-text-muted">{description}</p>
       {action &&
         (action.href ? (
           <Button asChild variant="secondary">
@@ -40,5 +40,5 @@ export function EmptyState({ icon: Icon, title, description, action, bare, class
   );
 
   if (bare) return <div className={className}>{body}</div>;
-  return <Card className={cn("shadow-none", className)}>{body}</Card>;
+  return <Card className={className}>{body}</Card>;
 }

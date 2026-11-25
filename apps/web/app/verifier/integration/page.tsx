@@ -5,8 +5,7 @@
 
 import Link from "next/link";
 import { isPredicateCode } from "@nexusid/types";
-import { Card } from "@/components/ui/card";
-import { CodeBlock, PredicateChip } from "@/components/nexus";
+import { CodeBlock, PageHeader, PredicateChip } from "@/components/nexus";
 import { PAGE_SNIPPET, outcomeSnippet, sessionSnippet } from "@/components/VerifierIntegrationCode";
 import { useRequirements } from "@/lib/verifierApi";
 
@@ -16,17 +15,18 @@ document.addEventListener("nexusid:result", (e) => {
   console.log("NexusID session", e.detail.requestId, e.detail.status);
 });`;
 
-function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+function Step({ n, title, last, children }: { n: number; title: string; last?: boolean; children: React.ReactNode }) {
   return (
-    <Card className="space-y-3 p-5 shadow-none">
-      <h3 className="flex items-center gap-3 font-display text-base font-semibold text-foreground">
-        <span className="flex size-6 items-center justify-center rounded-full bg-overlay text-xs tabular-nums text-text-muted">
-          {n}
-        </span>
-        {title}
-      </h3>
-      {children}
-    </Card>
+    <li className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-x-4 sm:gap-x-5">
+      {!last && <span className="absolute bottom-0 left-[13.5px] top-9 w-px bg-border" aria-hidden="true" />}
+      <span className="num relative z-10 flex size-7 items-center justify-center rounded-full border border-border-strong bg-background font-mono text-xs text-foreground">
+        {n}
+      </span>
+      <div className={last ? "min-w-0 space-y-3" : "min-w-0 space-y-3 pb-10"}>
+        <h2 className="pt-0.5 font-display text-base font-semibold text-foreground">{title}</h2>
+        {children}
+      </div>
+    </li>
   );
 }
 
@@ -36,13 +36,12 @@ export default function IntegrationPage() {
   const predicate = configured[0] ?? "AGE_OVER_18";
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="space-y-1">
-        <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">Integrate NexusID</h2>
-        <p className="text-sm text-text-muted">
-          Three steps. Your server never receives personal data, only whether the condition was met.
-        </p>
-      </div>
+    <div className="max-w-3xl space-y-8">
+      <PageHeader
+        title="Integration"
+        description="Three steps. Your server never receives personal data, only whether the condition was met."
+      />
+      <ol>
 
       <Step n={1} title="Open a session on your server">
         <p className="text-sm text-text-muted">
@@ -65,10 +64,11 @@ export default function IntegrationPage() {
         <CodeBlock label="JavaScript (optional)" code={EVENT_SNIPPET} copiedMessage="Code copied" />
       </Step>
 
-      <Step n={3} title="Read the outcome on your server">
+      <Step n={3} title="Read the outcome on your server" last>
         <p className="text-sm text-text-muted">Poll every 2 s until it isn&apos;t PENDING. Sessions expire after 120 s.</p>
         <CodeBlock label="Node.js" code={outcomeSnippet()} copiedMessage="Code copied" />
       </Step>
+      </ol>
     </div>
   );
 }

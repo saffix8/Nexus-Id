@@ -195,7 +195,7 @@ export default function QrSignInPage({
       </header>
 
       <main className="flex flex-1 items-center justify-center px-4 pb-16 pt-4 md:px-8">
-        <Card className="grid w-full max-w-[960px] overflow-hidden shadow-none md:grid-cols-[auto_1fr]">
+        <Card className="grid w-full max-w-[960px] overflow-hidden md:grid-cols-[auto_1fr]">
           {/* Left: the code */}
           <div className="flex items-center justify-center border-b border-border-subtle bg-inset p-6 md:border-b-0 md:border-r md:p-10">
             {error ? (

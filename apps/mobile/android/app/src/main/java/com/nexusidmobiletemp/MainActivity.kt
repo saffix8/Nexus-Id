@@ -1,5 +1,6 @@
 package com.nexusidmobiletemp
 
+import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -12,6 +13,15 @@ class MainActivity : ReactActivity() {
    * rendering of the component.
    */
   override fun getMainComponentName(): String = "NexusIDMobileTemp"
+
+  /**
+   * react-native-screens: never restore fragments. Without this the app crashes on launch
+   * whenever Android recreates the activity (process death in the background, density /
+   * display-size change). JS state is rebuilt from storage anyway.
+   */
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(null)
+  }
 
   /**
    * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]

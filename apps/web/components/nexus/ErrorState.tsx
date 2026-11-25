@@ -34,5 +34,5 @@ export function ErrorState({ title = "Couldn't load this", message, onRetry, ret
     </div>
   );
   if (bare) return <div className={className}>{body}</div>;
-  return <Card className={cn("shadow-none", className)}>{body}</Card>;
+  return <Card className={cn("", className)}>{body}</Card>;
 }

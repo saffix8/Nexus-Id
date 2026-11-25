@@ -15,6 +15,7 @@ import { useCredentialsStore } from '../store/credentials.store';
 import { useHistoryStore } from '../store/history.store';
 import { useSessionStore } from '../store/session.store';
 import { alpha, colors, space } from '../styles/tokens';
+import { useLayout } from '../styles/layout';
 import { Button, IconTile, Screen, Text } from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Proof'>;
@@ -23,6 +24,7 @@ type State = { kind: 'running'; step: ProofStep } | { kind: 'done' } | { kind: '
 
 export function ProofScreen({ route, navigation }: Props) {
   const { requestId, credentialId } = route.params;
+  const { compact } = useLayout();
   // Snapshot at mount: the backend drops the request from /pending once answered,
   // and the result screen still needs the verifier and predicate.
   // The request approved on SCR-008 travels with the prepared proof: the poller may already have
@@ -79,10 +81,11 @@ export function ProofScreen({ route, navigation }: Props) {
 
   if (state.kind === 'done') {
     return (
-      <Screen style={s.center}>
-        <AnimatedCheck size={128} />
+      <Screen style={s.frame}>
+        <View style={s.middle}>
+        <AnimatedCheck size={compact ? 96 : 128} />
         <Animated.View entering={FadeInUp.delay(500).duration(250)} style={{ alignItems: 'center', gap: space[3] }}>
-          <Text variant="pageTitle" align="center" style={{ fontSize: 28, lineHeight: 34 }} accessibilityLiveRegion="polite">
+          <Text variant="pageTitle" align="center" style={compact ? undefined : { fontSize: 28, lineHeight: 34 }} accessibilityLiveRegion="polite">
             Verified
           </Text>
           <Text variant="body" align="center" color={colors.text} style={{ maxWidth: 320 }}>
@@ -93,6 +96,7 @@ export function ProofScreen({ route, navigation }: Props) {
             <Text variant="bodySmall">{PRIVACY_LINE}</Text>
           </View>
         </Animated.View>
+        </View>
         <Button label="Done" onPress={() => navigation.navigate('Tabs', { screen: 'Wallet' })} style={s.bottomBtn} />
       </Screen>
     );
@@ -100,8 +104,8 @@ export function ProofScreen({ route, navigation }: Props) {
 
   const failed = state.kind === 'failed';
   return (
-    <Screen style={s.center}>
-      <View style={{ flex: 1, justifyContent: 'center', alignSelf: 'stretch', gap: space[8] }}>
+    <Screen style={s.frame}>
+      <View style={{ flex: 1, justifyContent: 'center', alignSelf: 'stretch', gap: compact ? space[6] : space[8] }}>
         <View style={{ alignItems: 'center', gap: space[2] }}>
           <Text variant="eyebrow">{verifier}</Text>
           <Text variant="pageTitle" align="center">
@@ -133,9 +137,11 @@ export function ProofScreen({ route, navigation }: Props) {
 }
 
 const s = StyleSheet.create({
-  center: { alignItems: 'center', justifyContent: 'center', gap: space[6], padding: space.page },
+  // Content centred in the free space; buttons in normal flow below it (never overlapping).
+  frame: { padding: space.page, paddingBottom: space[5] },
+  middle: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space[6] },
   privacy: { flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[2] },
-  bottomBtn: { alignSelf: 'stretch', position: 'absolute', left: space.page, right: space.page, bottom: space[8] },
+  bottomBtn: { alignSelf: 'stretch', marginTop: space[4] },
   failCard: {
     alignItems: 'center',
     gap: space[3],

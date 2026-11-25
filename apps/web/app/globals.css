@@ -50,7 +50,69 @@
     @apply border-border;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    /* Inter: straight-sided 1, open digits, single-storey a off — calmer, more "document" */
+    font-feature-settings: "cv11", "ss01", "ss03";
+    min-height: 100svh;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: rgba(59, 111, 232, 0.35);
+    color: #fff;
+  }
+
+  /* Thin, quiet scrollbars (Chromium + Firefox) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #252c3d transparent;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #252c3d; border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4560; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  :focus-visible {
+    outline: 2px solid #3b6fe8;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Eyebrow label — DESIGN §3.3 */
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted;
+  }
+  /* Tabular numerics for KPIs, times, counts */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "cv11";
+  }
+}
+
+@layer utilities {
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

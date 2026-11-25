@@ -51,17 +51,12 @@ export function HeroCredential() {
   return (
     <figure className="relative mx-auto w-full max-w-[440px]">
       <div
-        className="relative overflow-hidden rounded-2xl border border-border bg-surface p-6 pl-7"
+        className="relative overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_24px_64px_-24px_rgba(0,0,0,0.7)] sm:p-6"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 100% 0%, rgba(59,130,246,0.08), transparent 55%), repeating-linear-gradient(45deg, rgba(59,130,246,0.04) 0 1px, transparent 1px 10px)",
+            "radial-gradient(120% 90% at 100% 0%, rgba(59,130,246,0.12), transparent 55%), repeating-linear-gradient(45deg, rgba(59,130,246,0.04) 0 1px, transparent 1px 10px)",
         }}
       >
-        <span
-          className="absolute inset-y-0 left-0 w-1 bg-cat-identity"
-          aria-hidden="true"
-        />
-
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-cat-identity">

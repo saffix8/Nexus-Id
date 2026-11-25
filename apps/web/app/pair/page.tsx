@@ -37,7 +37,7 @@ export default function PairLandingPage() {
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm p-6 text-center shadow-none">
+      <Card className="w-full max-w-sm p-6 text-center">
         {invalid ? (
           <>
             <span className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-overlay text-text-muted">

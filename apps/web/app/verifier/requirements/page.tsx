@@ -16,6 +16,7 @@ import {
   type PredicateCode,
 } from "@nexusid/types";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/nexus/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,13 +32,6 @@ const CATEGORY_ORDER: CredentialType[] = [
 ];
 
 /** Strip colour per category — full class strings for Tailwind's scanner. */
-const STRIP: Record<CredentialType, string> = {
-  identity: "bg-cat-identity",
-  education: "bg-cat-education",
-  employment: "bg-cat-employment",
-  enrollment: "bg-cat-enrollment",
-};
-
 const BY_CATEGORY = CATEGORY_ORDER.map((category) => ({
   category,
   codes: PREDICATE_CODES.filter(
@@ -99,19 +93,13 @@ export default function RequirementsPage() {
   const loading = query.isPending;
 
   return (
-    <div className="space-y-6 pb-4">
-      <div className="max-w-2xl space-y-1">
-        <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">
-          What do you need to confirm?
-        </h2>
-        <p className="text-sm text-text-muted">
-          Pick the conditions your site may ask about. Users confirm a
-          condition, never share the data behind it. A session for a condition
-          that isn&apos;t picked here is refused.
-        </p>
-      </div>
+    <div className="space-y-6 pb-4 sm:space-y-8">
+      <PageHeader
+        title="Requirements"
+        description="Pick the conditions your site may ask about. Users confirm a condition, never share the data behind it. A session for a condition that isn't picked here is refused."
+      />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {BY_CATEGORY.map(({ category, codes }) => {
           const { Icon, text } = categoryMeta(category);
           const meta = CATEGORY_DISPLAY[category];
@@ -119,22 +107,18 @@ export default function RequirementsPage() {
           return (
             <Card
               key={category}
-              className="relative overflow-hidden shadow-none"
+              className="relative overflow-hidden"
             >
-              <span
-                className={cn("absolute inset-y-0 left-0 w-1", STRIP[category])}
-                aria-hidden="true"
-              />
               <fieldset
-                className="p-5 pl-6"
+                className="p-4 sm:p-5"
                 disabled={loading || save.isPending}
               >
                 <legend className="sr-only">{meta.label}</legend>
                 <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <span
                       className={cn(
-                        "flex size-9 items-center justify-center rounded-lg bg-overlay",
+                        "flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-overlay",
                         text,
                       )}
                     >
@@ -192,7 +176,7 @@ export default function RequirementsPage() {
                             <span className="flex-1 text-sm text-foreground">
                               {PREDICATE_DISPLAY[code].label}
                             </span>
-                            <code className="font-mono text-[11px] text-text-muted">
+                            <code className="hidden font-mono text-[11px] text-text-muted min-[440px]:inline">
                               {code}
                             </code>
                           </label>
@@ -208,7 +192,7 @@ export default function RequirementsPage() {
       </div>
 
       {/* Sticky footer: live preview + save */}
-      <div className="sticky bottom-4 z-10">
+      <div className="sticky bottom-3 z-10 sm:bottom-4">
         <Card className="flex flex-col gap-4 border-border bg-surface/95 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 space-y-2">
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted">
@@ -233,7 +217,7 @@ export default function RequirementsPage() {
               </div>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center justify-end gap-2">
             {dirty && (
               <Button
                 variant="ghost"
@@ -246,7 +230,7 @@ export default function RequirementsPage() {
             <Button
               onClick={onSave}
               disabled={loading || !dirty || save.isPending}
-              className="min-w-40"
+              className="flex-1 sm:min-w-40 sm:flex-none"
             >
               {save.isPending && (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />

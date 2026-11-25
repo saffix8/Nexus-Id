@@ -17,6 +17,7 @@ import { PRIVACY_LINE } from '../lib/copy';
 import type { RootStackParamList } from '../navigation/types';
 import { useCredentialsStore } from '../store/credentials.store';
 import { alpha, colors, space } from '../styles/tokens';
+import { MAX_CONTENT } from '../styles/layout';
 import {
   Button,
   Card,
@@ -79,7 +80,7 @@ export function CredentialDetailScreen({ route, navigation }: Props) {
         contentContainerStyle={{ padding: space.page, gap: space[5] }}
       >
         <CredentialCard
-          width={width - space.page * 2}
+          width={Math.min(width - space.page * 2, MAX_CONTENT)}
           category={cred.type}
           status={status}
           predicates={predicates}

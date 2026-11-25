@@ -7,12 +7,12 @@
 
 ## Quick Reference
 
-| What | Value |
-|------|-------|
-| Backend | `http://localhost:4000` |
-| Web portal | `http://localhost:3000` |
-| Postgres | Docker container `nexusid-postgres`, port 5432 |
-| DB name | `nexusid` |
+| What       | Value                                          |
+| ---------- | ---------------------------------------------- |
+| Backend    | `http://localhost:4000`                        |
+| Web portal | `http://localhost:3000`                        |
+| Postgres   | Docker container `nexusid-postgres`, port 5432 |
+| DB name    | `nexusid`                                      |
 
 ---
 
@@ -57,6 +57,7 @@ nexusid/                          ← npm workspace root
 ```
 
 The REQUIREMENTS.md file contains:
+
 - All 45 FRs (FR-001–FR-045) with acceptance criteria
 - All 51 API routes (API-001–API-051) with methods and paths
 - 9 algorithms (ALG-001–ALG-009)
@@ -77,8 +78,11 @@ For deep detail on any requirement, refer to `docs/SRS.md` (full 200-page SRS).
 # Install all workspace packages
 npm install
 
-# Start all services (run from repo root)
-bash dev-start.sh
+# Start all services (run from repo root): postgres, backend, web, Shop A, issuers 4001–4004, ML 5001
+bash dev-start.sh            # logs in .dev-logs/<name>.log (NADRA OTP: tail -f .dev-logs/nadra.log)
+bash dev-start.sh --mobile   # + emulator + Metro
+# Stop everything (only this repo's processes + NexusID ports; never `pkill -f "tsx watch"`)
+bash dev-stop.sh             # add --db to also stop the postgres container
 
 # Individual services
 npm run dev --workspace=services/backend
@@ -110,28 +114,33 @@ docker compose -f infra/docker-compose.yml ps
 ## Hard-Won Knowledge
 
 ### Postgres
+
 - Runs in Docker container named `nexusid-postgres` on port 5432
 - Check health: `docker ps --filter name=nexusid-postgres --format "{{.Status}}"`
 - NOT a system postgresql service — do not use `pg_isready` or `postgresql.service`
 - If container is stopped: `docker start nexusid-postgres`
 
 ### Prisma
+
 - Schema is at `services/backend/prisma/schema.prisma` — NOT at repo root
 - Every prisma CLI command MUST include `--schema=services/backend/prisma/schema.prisma`
 - Running without `--schema` will silently use a wrong path
 
 ### SD-JWT Package
+
 - Three named exports: `@nexusid/sd-jwt/issuer`, `@nexusid/sd-jwt/holder`, `@nexusid/sd-jwt/verifier`
 - Uses SHA-256 digests and RSA-2048 signatures (CON-007, CON-008)
 - Proof generation (ALG-001) MUST happen on device — private key never leaves Android Keystore
 
 ### Issuer Services
+
 - Each issuer exposes `GET /.well-known/jwks.json` for public key
 - Each issuer exposes `POST /api/v1/credentials/{type}/reverify` for account recovery
 - NADRA uses 2-step: `POST /verify` → OTP → `POST /verify-otp`
 - AU issuer rate-limited: 5 requests/minute per IP
 
 ### Next.js / Web Portal
+
 - App Router (Next.js 14) — no Pages Router
 - Tailwind **3.4** → shadcn/ui via **`npx shadcn@2.3.0`** only (latest CLI targets Tailwind v4)
 - Do NOT upgrade Tailwind, Next.js or React before the demo
@@ -139,6 +148,7 @@ docker compose -f infra/docker-compose.yml ps
 - Auth flow: NextAuth session cookie → API proxy routes (`/api/auth?action=login`)
 
 ### Docker Compose
+
 - File is at `infra/docker-compose.yml` — NOT at repo root
 - Use `docker compose -f infra/docker-compose.yml` for all compose commands
 
@@ -161,6 +171,7 @@ docker compose -f infra/docker-compose.yml ps
 ```
 
 **Key flows:**
+
 1. **Pairing**: Extension generates QR (FR-031) → mobile scans → pairing stored in backend
 2. **Verification**: SP creates session (API-030) → extension detects request (FR-032) → mobile notified (FR-019) → user approves (FR-021) → proof generated ON DEVICE (ALG-001) → submitted to backend (API-035) → backend verifies (ALG-002) → outcome available (API-031)
 3. **Issuance**: Mobile submits attributes (FR-006) → issuer validates → issues SD-JWT credential (FR-007) → stored encrypted on device

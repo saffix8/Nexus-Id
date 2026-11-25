@@ -60,3 +60,6 @@ apps/mobile/android/build/
 apps/mobile/android/app/build/
 apps/mobile/android/app/.cxx/
 *.apk
+
+# dev-start.sh logs and process-group ids
+.dev-logs/

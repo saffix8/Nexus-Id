@@ -1,0 +1,9 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "types": ["react-native"],
+    "skipLibCheck": true
+  },
+  "include": ["App.tsx", "index.js", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "android", "ios", "src/services/notification.service.ts"]
+}

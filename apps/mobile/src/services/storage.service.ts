@@ -1,515 +1,224 @@
 /**
  * storage.service.ts
- * NexusID Mobile — Local encrypted SQLite storage
+ * NexusID Mobile — encrypted on-device credential store (CON-010, BR-011).
  *
- * Manages credentials and verification data on-device.
- * Encryption key is derived from react-native-keychain (device-specific).
+ * Each credential (the SD-JWT and all its disclosures) is sealed with
+ * AES-256-GCM (@noble/ciphers) under a 256-bit key that lives in
+ * react-native-keychain (Android Keystore-backed). Every write uses a fresh
+ * random 96-bit IV; GCM's tag detects tampering. Only ciphertext reaches
+ * AsyncStorage, and none of it is ever sent to the backend.
+ *
+ * Verification history and pending requests are not stored here — they come
+ * from the backend (API-038, GET /verification/pending) and carry no claim values.
+ *
+ * Replaces the earlier react-native-sqlite-storage version: that package no
+ * longer builds on Gradle 9 (jcenter) and its `key` option is ignored without
+ * a SQLCipher build, so the database was never actually encrypted.
  */
 
-import SQLite, {
-  SQLiteDatabase,
-  Transaction,
-  ResultSet,
-} from 'react-native-sqlite-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
-import type { SDJWTCredential, CredentialType } from '@nexusid/types';
+import { gcm } from '@noble/ciphers/aes.js';
+import { randomBytes } from '@noble/ciphers/utils.js';
+import type { SDJWTCredential } from '@nexusid/types';
+import {
+  base64urlDecodeBytes,
+  base64urlEncodeBytes,
+  utf8Decode,
+  utf8Encode,
+} from '../crypto/holder';
 
-// ─── Local Types ─────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-export interface VerificationHistoryRecord {
-  id: string;
-  credential_id: string;
-  verifier_id: string;
-  verifier_name: string | null;
-  disclosed_fields: string[];   // field names that were shared
-  timestamp: string;            // ISO 8601
-  status: 'completed' | 'rejected' | 'failed';
-}
+const KEYCHAIN_SERVICE = 'com.nexusid.credential-store';
+const KEYCHAIN_ACCOUNT = 'aes-256-gcm-key';
+const INDEX_KEY = '@nexusid/credentials/index';
+const ITEM_PREFIX = '@nexusid/credentials/item/';
+const FORMAT_VERSION = 1;
 
-export interface PendingVerification {
-  id: string;                   // verification_request_id from backend
-  verifier_id: string;
-  verifier_name: string | null;
-  requested_fields: string[];
-  nonce: string;
-  expires_at: string;           // ISO 8601
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
-  received_at: string;          // ISO 8601
-}
-
-// ─── Storage Errors ───────────────────────────────────────────────────────────
+// ─── Errors ──────────────────────────────────────────────────────────────────
 
 export class StorageError extends Error {
-  constructor(
-    message: string,
-    public readonly cause?: unknown,
-  ) {
+  readonly cause?: unknown;
+  constructor(message: string, cause?: unknown) {
     super(message);
     this.name = 'StorageError';
+    this.cause = cause;
   }
 }
 
 export class StorageNotInitializedError extends StorageError {
   constructor() {
-    super('StorageService has not been initialized. Call initialize() first.');
+    super('StorageService has not been initialised. Call initialize() first.');
     this.name = 'StorageNotInitializedError';
   }
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── AES-256-GCM helpers ─────────────────────────────────────────────────────
 
-const DB_NAME = 'nexusid.db';
-const KEYCHAIN_SERVICE = 'com.nexusid.dbkey';
-const KEYCHAIN_ACCOUNT = 'db_encryption_key';
-
-// ─── SQL Statements ───────────────────────────────────────────────────────────
-
-const CREATE_CREDENTIALS_TABLE = `
-  CREATE TABLE IF NOT EXISTS credentials (
-    id           TEXT PRIMARY KEY,
-    type         TEXT NOT NULL,
-    issuer       TEXT NOT NULL,
-    sd_jwt       TEXT NOT NULL,
-    disclosures  TEXT NOT NULL,
-    issued_at    TEXT NOT NULL,
-    expires_at   TEXT NOT NULL,
-    display_name TEXT,
-    display_icon TEXT,
-    metadata     TEXT,
-    created_at   TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  )
-`;
-
-const CREATE_VERIFICATION_HISTORY_TABLE = `
-  CREATE TABLE IF NOT EXISTS verification_history (
-    id               TEXT PRIMARY KEY,
-    credential_id    TEXT NOT NULL,
-    verifier_id      TEXT NOT NULL,
-    verifier_name    TEXT,
-    disclosed_fields TEXT NOT NULL,
-    timestamp        TEXT NOT NULL,
-    status           TEXT NOT NULL
-  )
-`;
-
-const CREATE_PENDING_VERIFICATIONS_TABLE = `
-  CREATE TABLE IF NOT EXISTS pending_verifications (
-    id               TEXT PRIMARY KEY,
-    verifier_id      TEXT NOT NULL,
-    verifier_name    TEXT,
-    requested_fields TEXT NOT NULL,
-    nonce            TEXT NOT NULL,
-    expires_at       TEXT NOT NULL,
-    status           TEXT NOT NULL,
-    received_at      TEXT NOT NULL
-  )
-`;
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Promisifies SQLite executeSql.
- */
-function execSQL(
-  db: SQLiteDatabase,
-  sql: string,
-  params: (string | number | null)[] = [],
-): Promise<ResultSet> {
-  return new Promise((resolve, reject) => {
-    db.executeSql(
-      sql,
-      params,
-      (_tx: Transaction, result: ResultSet) => resolve(result),
-      (_tx: Transaction, error: Error) => {
-        reject(new StorageError(`SQL error: ${error.message}`, error));
-        return false; // tells SQLite not to roll back
-      },
-    );
-  });
+interface SealedRecord {
+  v: number;
+  iv: string; // base64url, 12 bytes
+  ct: string; // base64url, ciphertext || 16-byte tag
 }
 
-/**
- * Maps a SQLite row to an SDJWTCredential.
- */
-function rowToCredential(row: Record<string, string>): SDJWTCredential {
+function seal(key: Uint8Array, plaintext: string, aad: string): SealedRecord {
+  const iv = randomBytes(12);
+  const ct = gcm(key, iv, utf8Encode(aad)).encrypt(utf8Encode(plaintext));
   return {
-    id: row.id,
-    type: row.type as CredentialType,
-    issuer: row.issuer,
-    subject: '', // subject is encoded inside sd_jwt; not stored separately
-    sd_jwt: row.sd_jwt,
-    disclosures: JSON.parse(row.disclosures) as string[],
-    issued_at: row.issued_at,
-    expires_at: row.expires_at,
-    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-    // display_name / display_icon are UI hints — kept in metadata JSON
-  } as SDJWTCredential;
-}
-
-/**
- * Maps a SQLite row to a VerificationHistoryRecord.
- */
-function rowToHistoryRecord(row: Record<string, string>): VerificationHistoryRecord {
-  return {
-    id: row.id,
-    credential_id: row.credential_id,
-    verifier_id: row.verifier_id,
-    verifier_name: row.verifier_name ?? null,
-    disclosed_fields: JSON.parse(row.disclosed_fields) as string[],
-    timestamp: row.timestamp,
-    status: row.status as VerificationHistoryRecord['status'],
+    v: FORMAT_VERSION,
+    iv: base64urlEncodeBytes(iv),
+    ct: base64urlEncodeBytes(ct),
   };
 }
 
-/**
- * Maps a SQLite row to a PendingVerification.
- */
-function rowToPendingVerification(row: Record<string, string>): PendingVerification {
-  return {
-    id: row.id,
-    verifier_id: row.verifier_id,
-    verifier_name: row.verifier_name ?? null,
-    requested_fields: JSON.parse(row.requested_fields) as string[],
-    nonce: row.nonce,
-    expires_at: row.expires_at,
-    status: row.status as PendingVerification['status'],
-    received_at: row.received_at,
-  };
+function open(key: Uint8Array, record: SealedRecord, aad: string): string {
+  if (record.v !== FORMAT_VERSION)
+    throw new StorageError(`Unsupported record format ${record.v}`);
+  const pt = gcm(key, base64urlDecodeBytes(record.iv), utf8Encode(aad)).decrypt(
+    base64urlDecodeBytes(record.ct),
+  );
+  return utf8Decode(pt);
 }
 
-// ─── StorageService ───────────────────────────────────────────────────────────
+// ─── StorageService ──────────────────────────────────────────────────────────
 
 class StorageService {
-  private db: SQLiteDatabase | null = null;
+  private key: Uint8Array | null = null;
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-
-  /**
-   * Opens (or creates) the encrypted SQLite database and ensures all tables exist.
-   * Must be called once at app startup before any other method.
-   */
+  /** Loads (or creates on first run) the AES key from the Keystore-backed keychain. */
   async initialize(): Promise<void> {
-    if (this.db) return; // already initialized
-
+    if (this.key) return;
     try {
-      const encryptionKey = await this.getOrCreateEncryptionKey();
-
-      SQLite.enablePromise(true);
-
-      this.db = await SQLite.openDatabase({
-        name: DB_NAME,
-        location: 'default',
-        // react-native-sqlite-storage supports SQLCipher when compiled with it.
-        // Pass the key here; the library forwards it to PRAGMA key='...'.
-        key: encryptionKey,
-      });
-
-      await this.createTables();
+      this.key = await this.getOrCreateKey();
     } catch (error) {
-      throw new StorageError('Failed to initialize database', error);
+      throw new StorageError(
+        'Could not unlock the encrypted credential store',
+        error,
+      );
     }
   }
 
-  /**
-   * Retrieves an existing encryption key from the keychain, or generates and
-   * stores a new one if this is the first run.
-   */
-  private async getOrCreateEncryptionKey(): Promise<string> {
+  private async getOrCreateKey(): Promise<Uint8Array> {
     const existing = await Keychain.getGenericPassword({
       service: KEYCHAIN_SERVICE,
     });
-
     if (existing) {
-      return existing.password;
+      const key = base64urlDecodeBytes(existing.password);
+      if (key.length === 32) return key;
     }
-
-    // First run — generate a 32-byte random key (hex-encoded)
-    const bytes = new Uint8Array(32);
-    // React Native's global crypto is available in RN 0.69+
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-      crypto.getRandomValues(bytes);
-    } else {
-      // Fallback: Math.random (less secure — swap for a native module in production)
-      for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = Math.floor(Math.random() * 256);
-      }
+    if (typeof (globalThis as { crypto?: { getRandomValues?: unknown } }).crypto?.getRandomValues !== 'function') {
+      // Never fall back to Math.random for key material.
+      throw new StorageError(
+        'No secure random number generator available (react-native-get-random-values not loaded).',
+      );
     }
-    const key = Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    await Keychain.setGenericPassword(KEYCHAIN_ACCOUNT, key, {
-      service: KEYCHAIN_SERVICE,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    });
-
+    const key = randomBytes(32);
+    await Keychain.setGenericPassword(
+      KEYCHAIN_ACCOUNT,
+      base64urlEncodeBytes(key),
+      {
+        service: KEYCHAIN_SERVICE,
+        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      },
+    );
     return key;
   }
 
-  /** Creates tables if they do not already exist. */
-  private async createTables(): Promise<void> {
-    const db = this.requireDb();
-    await execSQL(db, CREATE_CREDENTIALS_TABLE);
-    await execSQL(db, CREATE_VERIFICATION_HISTORY_TABLE);
-    await execSQL(db, CREATE_PENDING_VERIFICATIONS_TABLE);
+  private requireKey(): Uint8Array {
+    if (!this.key) throw new StorageNotInitializedError();
+    return this.key;
   }
 
-  /** Throws if the database hasn't been opened yet. */
-  private requireDb(): SQLiteDatabase {
-    if (!this.db) throw new StorageNotInitializedError();
-    return this.db;
+  private async readIndex(): Promise<string[]> {
+    const raw = await AsyncStorage.getItem(INDEX_KEY);
+    if (!raw) return [];
+    try {
+      const ids: unknown = JSON.parse(raw);
+      return Array.isArray(ids)
+        ? ids.filter((x): x is string => typeof x === 'string')
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeIndex(ids: string[]): Promise<void> {
+    await AsyncStorage.setItem(INDEX_KEY, JSON.stringify([...new Set(ids)]));
   }
 
   // ── Credentials ────────────────────────────────────────────────────────────
 
-  /**
-   * Persists an SDJWTCredential.
-   * Uses INSERT OR REPLACE so re-issuing an existing credential updates it in place.
-   */
+  /** Encrypts and stores (or replaces) a credential. */
   async saveCredential(credential: SDJWTCredential): Promise<void> {
-    const db = this.requireDb();
-
-    const metadata = credential.metadata
-      ? JSON.stringify(credential.metadata)
-      : null;
-
-    await execSQL(
-      db,
-      `INSERT OR REPLACE INTO credentials
-        (id, type, issuer, sd_jwt, disclosures, issued_at, expires_at, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        credential.id,
-        credential.type,
-        credential.issuer,
-        credential.sd_jwt,
-        JSON.stringify(credential.disclosures),
-        credential.issued_at,
-        credential.expires_at,
-        metadata,
-      ],
-    );
+    const key = this.requireKey();
+    try {
+      const sealed = seal(key, JSON.stringify(credential), credential.id);
+      await AsyncStorage.setItem(
+        ITEM_PREFIX + credential.id,
+        JSON.stringify(sealed),
+      );
+      await this.writeIndex([...(await this.readIndex()), credential.id]);
+    } catch (error) {
+      throw new StorageError('Failed to save credential', error);
+    }
   }
 
-  /**
-   * Retrieves a single credential by id.
-   * Returns null if not found.
-   */
+  /** Decrypts one credential; null if missing. Throws if the record was tampered with. */
   async getCredential(id: string): Promise<SDJWTCredential | null> {
-    const db = this.requireDb();
-    const result = await execSQL(
-      db,
-      'SELECT * FROM credentials WHERE id = ? LIMIT 1',
-      [id],
-    );
-
-    if (result.rows.length === 0) return null;
-    return rowToCredential(result.rows.item(0) as Record<string, string>);
+    const key = this.requireKey();
+    const raw = await AsyncStorage.getItem(ITEM_PREFIX + id);
+    if (!raw) return null;
+    try {
+      return JSON.parse(
+        open(key, JSON.parse(raw) as SealedRecord, id),
+      ) as SDJWTCredential;
+    } catch (error) {
+      throw new StorageError(`Credential ${id} could not be decrypted`, error);
+    }
   }
 
-  /**
-   * Returns all credentials, ordered from newest to oldest.
-   */
+  /** All credentials, oldest first. Unreadable records are skipped. */
   async getAllCredentials(): Promise<SDJWTCredential[]> {
-    const db = this.requireDb();
-    const result = await execSQL(
-      db,
-      'SELECT * FROM credentials ORDER BY created_at DESC',
-    );
-
-    const credentials: SDJWTCredential[] = [];
-    for (let i = 0; i < result.rows.length; i++) {
-      credentials.push(
-        rowToCredential(result.rows.item(i) as Record<string, string>),
-      );
+    this.requireKey();
+    const out: SDJWTCredential[] = [];
+    for (const id of await this.readIndex()) {
+      try {
+        const c = await this.getCredential(id);
+        if (c) out.push(c);
+      } catch (error) {
+        console.warn(
+          '[StorageService] skipping unreadable credential',
+          id,
+          error,
+        );
+      }
     }
-    return credentials;
+    return out;
   }
 
-  /**
-   * Deletes a credential and all associated history records.
-   */
   async deleteCredential(id: string): Promise<void> {
-    const db = this.requireDb();
-
-    await new Promise<void>((resolve, reject) => {
-      db.transaction(
-        (tx) => {
-          tx.executeSql('DELETE FROM verification_history WHERE credential_id = ?', [id]);
-          tx.executeSql('DELETE FROM credentials WHERE id = ?', [id]);
-        },
-        (error) => reject(new StorageError(`Failed to delete credential ${id}`, error)),
-        () => resolve(),
-      );
-    });
-  }
-
-  /**
-   * Finds the first credential whose selectively_disclosable_fields contains
-   * ALL of the requested fields.
-   *
-   * Returns null if no matching credential exists.
-   */
-  async findCredentialForFields(
-    requestedFields: string[],
-  ): Promise<SDJWTCredential | null> {
-    if (requestedFields.length === 0) return null;
-
-    const credentials = await this.getAllCredentials();
-
-    for (const credential of credentials) {
-      const disclosable =
-        credential.metadata?.selectively_disclosable_fields ?? [];
-
-      // Also consider always_visible_fields as satisfiable
-      const alwaysVisible =
-        credential.metadata?.always_visible_fields ?? [];
-
-      const allSatisfiable = new Set([...disclosable, ...alwaysVisible]);
-
-      const canSatisfy = requestedFields.every((field) =>
-        allSatisfiable.has(field),
-      );
-
-      if (canSatisfy) return credential;
+    this.requireKey();
+    try {
+      await AsyncStorage.removeItem(ITEM_PREFIX + id);
+      await this.writeIndex((await this.readIndex()).filter(x => x !== id));
+    } catch (error) {
+      throw new StorageError('Failed to delete credential', error);
     }
-
-    return null;
   }
 
-  // ── Verification History ───────────────────────────────────────────────────
-
-  /**
-   * Records a completed or rejected verification event.
-   */
-  async saveVerificationHistory(
-    record: VerificationHistoryRecord,
-  ): Promise<void> {
-    const db = this.requireDb();
-
-    await execSQL(
-      db,
-      `INSERT OR REPLACE INTO verification_history
-        (id, credential_id, verifier_id, verifier_name, disclosed_fields, timestamp, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        record.id,
-        record.credential_id,
-        record.verifier_id,
-        record.verifier_name ?? null,
-        JSON.stringify(record.disclosed_fields),
-        record.timestamp,
-        record.status,
-      ],
-    );
-  }
-
-  /**
-   * Returns verification history records, newest first.
-   * Pass a limit to cap the result set (defaults to 100).
-   */
-  async getVerificationHistory(
-    limit = 100,
-  ): Promise<VerificationHistoryRecord[]> {
-    const db = this.requireDb();
-    const result = await execSQL(
-      db,
-      'SELECT * FROM verification_history ORDER BY timestamp DESC LIMIT ?',
-      [limit],
-    );
-
-    const records: VerificationHistoryRecord[] = [];
-    for (let i = 0; i < result.rows.length; i++) {
-      records.push(
-        rowToHistoryRecord(result.rows.item(i) as Record<string, string>),
-      );
-    }
-    return records;
-  }
-
-  /**
-   * Deletes a single history record by id.
-   */
-  async deleteHistoryRecord(id: string): Promise<void> {
-    const db = this.requireDb();
-    await execSQL(db, 'DELETE FROM verification_history WHERE id = ?', [id]);
-  }
-
-  // ── Pending Verifications ──────────────────────────────────────────────────
-
-  /**
-   * Saves a new pending verification request received via push notification.
-   */
-  async savePendingVerification(request: PendingVerification): Promise<void> {
-    const db = this.requireDb();
-
-    await execSQL(
-      db,
-      `INSERT OR REPLACE INTO pending_verifications
-        (id, verifier_id, verifier_name, requested_fields, nonce, expires_at, status, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        request.id,
-        request.verifier_id,
-        request.verifier_name ?? null,
-        JSON.stringify(request.requested_fields),
-        request.nonce,
-        request.expires_at,
-        request.status,
-        request.received_at,
-      ],
-    );
-  }
-
-  /**
-   * Retrieves a pending verification by id.
-   * Returns null if not found.
-   */
-  async getPendingVerification(id: string): Promise<PendingVerification | null> {
-    const db = this.requireDb();
-    const result = await execSQL(
-      db,
-      'SELECT * FROM pending_verifications WHERE id = ? LIMIT 1',
-      [id],
-    );
-
-    if (result.rows.length === 0) return null;
-    return rowToPendingVerification(
-      result.rows.item(0) as Record<string, string>,
-    );
-  }
-
-  /**
-   * Updates the status of a pending verification (approved / rejected / expired).
-   */
-  async updatePendingVerificationStatus(
-    id: string,
-    status: PendingVerification['status'],
-  ): Promise<void> {
-    const db = this.requireDb();
-    await execSQL(
-      db,
-      'UPDATE pending_verifications SET status = ? WHERE id = ?',
-      [status, id],
-    );
-  }
-
-  /**
-   * Deletes all pending verifications whose expires_at timestamp is in the past.
-   * Call this on app startup and periodically during the session.
-   */
-  async clearExpiredPending(): Promise<void> {
-    const db = this.requireDb();
-    const now = new Date().toISOString();
-    await execSQL(
-      db,
-      "DELETE FROM pending_verifications WHERE expires_at < ? AND status = 'pending'",
-      [now],
-    );
+  /** Removes every credential and the key (sign-out of this device). */
+  async clearAllData(): Promise<void> {
+    const ids = await this.readIndex();
+    await AsyncStorage.removeMany([
+      INDEX_KEY,
+      ...ids.map(id => ITEM_PREFIX + id),
+    ]);
+    await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
+    this.key = null;
   }
 }
 
-// ─── Singleton Export ─────────────────────────────────────────────────────────
-
+export { StorageService };
 export const storageService = new StorageService();
 export default storageService;

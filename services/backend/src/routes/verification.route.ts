@@ -380,4 +380,33 @@ router.get(
   },
 );
 
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/verification/history/:id — API-039 (FR-030)
+// DELETE /api/v1/verification/history     — API-040 (FR-030)
+// Soft delete from the End User's own view; the SP log is kept (BR-023).
+// ---------------------------------------------------------------------------
+
+router.delete(
+  "/history/:id",
+  verifyJWT,
+  answerRoute((id, userId) => verificationService.deleteHistoryEntry(userId, id)),
+);
+
+router.delete(
+  "/history",
+  verifyJWT,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const user_id = req.user?.sub;
+      if (!user_id) {
+        res.status(401).json(failure("User identity missing from token"));
+        return;
+      }
+      res.status(200).json(success(await verificationService.clearHistory(user_id)));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 export default router;

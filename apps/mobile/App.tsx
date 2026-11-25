@@ -1,45 +1,42 @@
 /**
- * Sample React Native App
- * https://github.com/facebook/react-native
+ * NexusID Android wallet — app root.
+ * Dark only (DESIGN.md). Providers: gesture handler (bottom sheet), safe area, navigation.
  *
  * @format
  */
+import React from 'react';
+import { StatusBar } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native';
+import { RootNavigator } from './src/navigation/RootNavigator';
+import { navigationRef } from './src/navigation/navigationRef';
+import { colors } from './src/styles/tokens';
+import { ToastHost } from './src/ui';
 
-import { NewAppScreen } from '@react-native/new-app-screen';
-import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
-
-function App() {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  return (
-    <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent />
-    </SafeAreaProvider>
-  );
-}
-
-function AppContent() {
-  const safeAreaInsets = useSafeAreaInsets();
-
-  return (
-    <View style={styles.container}>
-      <NewAppScreen
-        templateFileName="App.tsx"
-        safeAreaInsets={safeAreaInsets}
-      />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+const theme: Theme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    primary: colors.accent,
+    background: colors.bg,
+    card: colors.surface,
+    text: colors.text,
+    border: colors.border,
+    notification: colors.accent,
   },
-});
+};
 
-export default App;
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaProvider>
+        <StatusBar barStyle="light-content" />
+        <NavigationContainer ref={navigationRef} theme={theme}>
+          <RootNavigator />
+        </NavigationContainer>
+        <ToastHost />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}

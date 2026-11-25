@@ -1,7 +1,8 @@
-# ▶ RESUME HERE (updated 2026-11-25, 00:45 PKT)
+# ▶ RESUME HERE (updated 2026-11-25, Phase 6)
 
-**Where we are:** Phases 0 → 5 of `docs/DEMO_BUILD.md` §4 are done. Phase 5 (extension) is verified live in Chrome.
-**Next:** Phase 6, mobile wallet (prompt in `docs/DEMO_BUILD.md` → "Phase 6"). Optional quick checks first, see "Open items".
+**Where we are:** Phases 0 → 5 done. **Phase 6 (mobile wallet) code complete** — see the Phase 6 section below for
+what is verified and what still needs a device run.
+**Next:** run the phone app end to end on the emulator/phone (checklist in the Phase 6 section), then Phase 7.
 
 ## Demo story status (DEMO_BUILD.md §1)
 
@@ -60,6 +61,68 @@
 Uncommitted work = Phase 4 (`apps/demo-shop/`, `dev-start.sh`, root `package.json`) + Phase 5 (below) + tonight's fixes.
 `package-lock.json` changed (adds `@types/chrome` for the new `apps/extension` workspace).
 Suggested: commit Phase 4 and Phase 5 as two commits before starting Phase 6.
+
+---
+
+# NexusID — Phase 6: Mobile wallet (2026-11-25)
+
+`apps/mobile` was the bare RN template (no dependencies, `App.tsx` = sample screen, `src/` never compiled).
+Now a real app on **React Native 0.88.1** (new arch, Hermes), DESIGN.md §3/§5/§6.2.
+
+## Setup changes
+- **Not in the root npm workspace any more** (root `package.json` lists `apps/web`, `apps/extension`,
+  `apps/demo-shop` explicitly). RN needs React 19, web is on React 18. Install with
+  `cd apps/mobile && nvm use && npm install --no-workspaces`. Needs **Node 22** (`.nvmrc`).
+- `@nexusid/types` linked with `file:`; Metro watches `packages/types`. `@nexusid/sd-jwt` is **not** used on the phone.
+- Kit per §6.2 (no NativeWind): `src/styles/tokens.ts` + own `src/ui/*`, lucide-react-native, reanimated 4,
+  @gorhom/bottom-sheet 5, react-native-svg, vision-camera 5 (QR), react-native-biometrics, keychain.
+- Fonts bundled: `android/app/src/main/assets/fonts` (DM Sans, Inter, JetBrains Mono — OFL).
+- Manifest: CAMERA, USE_BIOMETRIC. App label "NexusID".
+
+## Screens (src/screens)
+SignIn (+ "Securing your device…" while the Keystore key is made, FR-002) · Lock (FR-015, auto biometric prompt,
+re-locks after 30 s in background) · Wallet SCR-002 (Apple Wallet stack, empty state with 4 category tiles,
+pending-request banner) · CredentialDetail SCR-003 (Confirms list label + mono code, details, Update/Delete with
+confirm) · AddCredential SCR-004/005 (state machine pick → form → [NADRA OTP 6 boxes] → processing → success/error;
+NADRA, HEC, Air University, LinkedIn OAuth) · Scan SCR-007 (camera, cutout, animated corners, pairing API-025) ·
+Request SCR-008 (`ConsentSheet`: WILL BE CONFIRMED / NEVER SHARED, 120 s ring warning < 30 s / danger < 10 s,
+Decline confirm, Approve with fingerprint, expired state, no-credential → API-037) · Proof SCR-009
+(`ProofStepper` 3 steps ≥ 400 ms each → drawn check "Verified"; failure with backend reason + Retry while open) ·
+History SCR-010 (grouped by day, outcome badges, long-press delete, Clear all) · Profile.
+Bottom tabs Wallet · History · Profile + centred floating Scan button.
+
+## Crypto / storage changes (approved by Safi 2026-11-25)
+- **On-device holder ported:** `apps/mobile/src/crypto/holder.ts` mirrors `packages/sd-jwt/src/holder.ts` (like
+  `apps/web/lib/webHolder.ts`) with pure-JS SHA-256 (`@noble/hashes`) and its own base64url/UTF-8, because Hermes has
+  no Node `crypto`, no `crypto.subtle`. Signer = Android Keystore (`keystore.service.ts` → `createSignature`).
+  The package itself is unchanged. **Any change to holder.ts must be mirrored in both copies.**
+- **Bug fixed:** the old `crypto.service.ts` put `sd_hash` in **hex**; the verifier expects base64url (RFC 9901) →
+  every phone proof would have failed.
+- **Proof check:** `npx tsx scripts/check-mobile-holder.mts` → issues a real credential (package issuer), builds the
+  proof with the phone holder, verifies with the backend `verifyProof`: **all checks pass** (accepts valid; rejects
+  wrong nonce and a different holder key; SHA-256/base64url/UTF-8 incl. Urdu text match Node).
+- **One fingerprint prompt per approval:** Approve signs the KB-JWT with the Keystore key; that biometric prompt is
+  the FR-015 auth for FR-021. Then the stepper shows the steps and sends (API-035).
+- **Storage rewritten (CON-010):** `react-native-sqlite-storage` failed the Gradle 9 build (`jcenter()`) and never
+  encrypted (its `key` needs SQLCipher). Now each credential is sealed with **AES-256-GCM** (`@noble/ciphers`), fresh
+  96-bit IV per write, credential id as AAD; 256-bit key in `react-native-keychain` (Keystore-backed); ciphertext in
+  AsyncStorage. CSPRNG from `react-native-get-random-values` (no Math.random fallback any more).
+- Sign-out deletes the device key (as before) **and** wipes the credential store (credentials are cnf-bound to that key).
+- `KeystoreService.getInstance()` added; `signData()` takes a prompt title ("Approve request from Shop A").
+
+## Backend: history delete (API-039/040, FR-030, BR-023)
+- Migration `history_user_delete`: `verification_requests.user_deleted_at` (soft delete).
+- `DELETE /api/v1/verification/history/:id` and `DELETE /api/v1/verification/history` (device JWT). Hidden from API-038
+  (phone + web), **SP log and audit log keep the row** (BR-023). 404 for pending / not yours / already deleted.
+- Tests: 5 new in `verification-loop.test.ts`; backend suite **105/105 pass**.
+
+## Important for the demo
+- **Credentials are bound to the device key (cnf).** Signing in on the phone registers the phone's key
+  (`PUT /users/me/public-key`) and replaces the web stand-in key for that account. Add credentials **on the phone,
+  after signing in there**. Old web-issued credentials won't verify from the phone (and vice versa).
+- Push (FR-019) = **polling `GET /verification/pending` every 3 s** while unlocked. Real FCM needs a Firebase project
+  (`google-services.json`); `notification.service.ts` is kept but excluded from the build.
+- Backend URL `src/config.ts`: `10.0.2.2:4000` (emulator). Real phone → laptop LAN IP.
 
 ---
 

@@ -184,9 +184,21 @@ rec(
 const field =
   "degree_title" in claims ? "degree_title" : Object.keys(claims)[0];
 const others = Object.keys(claims).filter((k) => k !== field);
-async function newRequest(fields = [field]) {
+// FR-041 / FR-043 AC3: sessions are only accepted for predicates the SP configured.
+const reqs = await call("PUT", "/verifiers/requirements", {
+  body: { predicates: [field] },
+  headers: { authorization: `Bearer ${vreg.body?.data?.token}` },
+});
+rec(
+  "setup",
+  `SP configures predicate '${field}'`,
+  reqs.status === 200,
+  `HTTP ${reqs.status} ${reqs.body?.error ?? ""}`,
+);
+// API-030 takes one catalog predicate per session (BR-021).
+async function newRequest(predicate = field) {
   const s = await call("POST", "/verification/sessions", {
-    body: { requestedFields: fields },
+    body: { predicate },
     headers: { "x-api-key": apiKey },
   });
   const { sessionId, nonce } = s.body?.data ?? {};
@@ -208,7 +220,7 @@ rec(
   2,
   `SP session for ONE claim ('${field}') + extension relay`,
   main.s.status === 201 && main.r.status === 200,
-  `session ${main.s.status}, relay ${main.r.status}, requested=${JSON.stringify(main.r.body?.data?.requestedFields)}`,
+  `session ${main.s.status}, relay ${main.r.status}, predicate=${main.r.body?.data?.predicate ?? JSON.stringify(main.s.body?.error)}`,
 );
 const pend = await call("GET", "/verification/pending", { headers: auth });
 const pendList = pend.body?.data?.requests ?? pend.body?.data ?? [];
@@ -256,7 +268,9 @@ async function negative(label, mutate, expectReject = true) {
   const r = await newRequest();
   const p = await mutate(r);
   const res = await submit(r.sessionId, p);
-  const rejected = res.status >= 400;
+  // 422 = request-shape validation: the proof never reached the verifier, so
+  // it says nothing about the check under test.
+  const rejected = res.status >= 400 && res.status !== 422;
   rec(
     4,
     label,
@@ -320,16 +334,25 @@ await negative(
     return fresh(r, { userPrivateKey: other.privateKey });
   },
 );
-await negative(
-  "Key binding: disclosures swapped after signing (sd_hash) rejected",
-  async (r) => {
-    const p = await fresh(r);
-    p.presentation.disclosures = [
-      cred.disclosures.find((d) => decodeDisc(d)[1] === others[0]),
-    ];
-    return p;
-  },
-);
+if (others.length === 0) {
+  rec(
+    4,
+    "Key binding: disclosures swapped after signing (sd_hash) rejected",
+    null,
+    "credential has a single claim — no other disclosure to swap in",
+  );
+} else {
+  await negative(
+    "Key binding: disclosures swapped after signing (sd_hash) rejected",
+    async (r) => {
+      const p = await fresh(r);
+      p.presentation.disclosures = [
+        cred.disclosures.find((d) => decodeDisc(d)[1] === others[0]),
+      ];
+      return p;
+    },
+  );
+}
 await negative("Nonce: proof bound to a different nonce rejected", async (r) =>
   fresh(r, { nonce: "not-the-nonce" }),
 );
@@ -364,17 +387,26 @@ await negative(
       userPrivateKey: priv,
     }),
 );
-await negative(
-  "Policy: proof disclosing an UNREQUESTED claim instead rejected",
-  async (r) =>
-    holder.generateProof({
-      credential: cred,
-      requestedFields: [others[0]],
-      verifierId,
-      nonce: r.nonce,
-      userPrivateKey: priv,
-    }),
-);
+if (others.length === 0) {
+  rec(
+    4,
+    "Policy: proof disclosing an UNREQUESTED claim instead rejected",
+    null,
+    "credential has a single claim — nothing else to disclose",
+  );
+} else {
+  await negative(
+    "Policy: proof disclosing an UNREQUESTED claim instead rejected",
+    async (r) =>
+      holder.generateProof({
+        credential: cred,
+        requestedFields: [others[0]],
+        verifierId,
+        nonce: r.nonce,
+        userPrivateKey: priv,
+      }),
+  );
+}
 // Expired session: force expiresAt into the past
 {
   const r = await newRequest();
@@ -457,13 +489,18 @@ rec(
   `outcome=${outStr.slice(0, 160)}`,
 );
 const dbVal = psql(
-  `SELECT verified_fields::text FROM verification_results WHERE request_id = '${main.sessionId}'`,
+  `SELECT row_to_json(v)::text FROM verification_results v WHERE request_id = '${main.sessionId}'`,
 );
+// BR-015: only outcome, condition name, proof hash and issuer may be stored.
+const dbLeak = Object.entries(claims)
+  .filter(([, v]) => typeof v !== "boolean")
+  .filter(([, v]) => dbVal.includes(String(v)))
+  .map(([k]) => k);
 rec(
   5,
   "Backend DB stores no claim values (BR-015)",
-  !dbVal.includes(String(claims[field])),
-  `verification_results.verified_fields=${dbVal}`,
+  dbVal !== "" && dbLeak.length === 0,
+  `verification_results=${dbVal.slice(0, 200)}${dbLeak.length ? ", LEAKED " + dbLeak : ""}`,
 );
 
 // ── 6. Audit + blockchain unavailable ────────────────────────────────────

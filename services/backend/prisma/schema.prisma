@@ -98,6 +98,9 @@ model VerificationRequest {
   rejectedAt      DateTime?           @map("rejected_at") @db.Timestamptz(6)
   /// When the extension relayed this session to the paired device (API-032, FR-032).
   relayedAt       DateTime?           @map("relayed_at") @db.Timestamptz(6)
+  /// FR-030 / BR-023: the End User removed this entry from their own history.
+  /// The row stays for the Service Provider log and the audit log.
+  userDeletedAt   DateTime?           @map("user_deleted_at") @db.Timestamptz(6)
   /// SHA-256 of the poll secret the extension uses to read the outcome (API-033).
   pollSecretHash  String?             @unique @map("poll_secret_hash")
   fraudFlags      FraudFlag[]

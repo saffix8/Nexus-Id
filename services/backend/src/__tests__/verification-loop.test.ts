@@ -863,3 +863,89 @@ describe("ALG-002 — remaining checks", () => {
     expect(res.body.details.outcome).toBe("FAILED");
   });
 });
+
+// ─── 5. History delete (API-039/040, FR-030, BR-023) ─────────────────────────
+
+describe("5 — History delete (API-039/040)", () => {
+  async function declined(): Promise<string> {
+    const { sessionId } = await openRelayed();
+    await request(app)
+      .post(`/api/v1/verification/reject/${sessionId}`)
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(200);
+    return sessionId;
+  }
+
+  async function historyIds(): Promise<string[]> {
+    const res = await request(app)
+      .get("/api/v1/verification/history?limit=100")
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(200);
+    return res.body.data.map((r: { requestId: string }) => r.requestId);
+  }
+
+  async function spLogIds(): Promise<string[]> {
+    const res = await request(app)
+      .get("/api/v1/verifiers/me/requests")
+      .set("Authorization", `Bearer ${shopPortalToken}`)
+      .expect(200);
+    return res.body.data.map((r: { id: string }) => r.id);
+  }
+
+  it("API-039 hides one entry from the End User but keeps the SP log (BR-023)", async () => {
+    const id = await declined();
+    expect(await historyIds()).toContain(id);
+
+    await request(app)
+      .delete(`/api/v1/verification/history/${id}`)
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(200);
+
+    expect(await historyIds()).not.toContain(id);
+    expect(await spLogIds()).toContain(id);
+    expect(
+      await prisma.verificationRequest.findUnique({ where: { id } }),
+    ).toMatchObject({ status: "rejected", userDeletedAt: expect.any(Date) });
+  });
+
+  it("API-039 returns 404 for an entry already deleted or not the user's", async () => {
+    const id = await declined();
+    await request(app)
+      .delete(`/api/v1/verification/history/${id}`)
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(200);
+    await request(app)
+      .delete(`/api/v1/verification/history/${id}`)
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(404);
+    await request(app)
+      .delete(`/api/v1/verification/history/${randomUUID()}`)
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(404);
+  });
+
+  it("API-039 cannot delete a pending request", async () => {
+    const { sessionId } = await openRelayed();
+    await request(app)
+      .delete(`/api/v1/verification/history/${sessionId}`)
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(404);
+  });
+
+  it("API-040 clears the whole history; the SP log keeps every entry", async () => {
+    const a = await declined();
+    const b = await declined();
+    const res = await request(app)
+      .delete("/api/v1/verification/history")
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(200);
+    expect(res.body.data.deleted).toBeGreaterThanOrEqual(2);
+    expect(await historyIds()).toEqual([]);
+    const log = await spLogIds();
+    expect(log).toEqual(expect.arrayContaining([a, b]));
+  });
+
+  it("requires the device JWT — 401 without it", async () => {
+    await request(app).delete("/api/v1/verification/history").expect(401);
+  });
+});

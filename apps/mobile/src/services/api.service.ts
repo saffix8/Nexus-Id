@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { EventEmitter } from 'eventemitter3';
 import type {
   ApiResponse,
+  SDJWTCredential,
   Proof,
   VerificationResult,
   VerificationRequest,
@@ -276,6 +277,103 @@ class ApiService {
     });
   }
 
+  // ── Mobile wallet UI (Phase 6) ────────────────────────────────────────────
+
+  /**
+   * Like request(), but also accepts a bare (non-enveloped) body — the issuer
+   * proxy routes return the issuer's reply as-is.
+   */
+  private async requestLoose<T>(config: AxiosRequestConfig): Promise<T> {
+    try {
+      const response = await this.client.request<unknown>(config);
+      const body = response.data as Record<string, unknown> | null;
+      if (body && typeof body === 'object' && 'success' in body) {
+        if (body.success === false) {
+          throw new ApiError(String(body.error ?? 'Request failed.'), response.status);
+        }
+        if ('data' in body) return body.data as T;
+      }
+      return body as T;
+    } catch (err) {
+      if (err instanceof AuthError || err instanceof ApiError) throw err;
+      const axiosErr = err as AxiosError<{ error?: string; message?: string }>;
+      if (axiosErr.response) {
+        const data = axiosErr.response.data;
+        throw new ApiError(data?.error ?? data?.message ?? axiosErr.message, axiosErr.response.status);
+      }
+      throw new NetworkError('Unable to reach the server. Check your connection.', 'NO_CONNECTION');
+    }
+  }
+
+  /** API-018 email + password sign-in. Saves and returns the JWT. */
+  async signIn(email: string, password: string): Promise<string> {
+    const data = await this.request<LoginResponseData>({
+      method: 'POST',
+      url: '/auth/login',
+      data: { email, password },
+    });
+    await this.saveToken(data.token);
+    return data.token;
+  }
+
+  /** Registers this device's Keystore public key (PEM) for the signed-in user. */
+  async updateMyPublicKey(publicKeyPem: string): Promise<void> {
+    await this.request<null>({ method: 'PUT', url: '/users/me/public-key', data: { public_key: publicKeyPem } });
+  }
+
+  /** Requests routed to this user that await approval (UC-004). */
+  async getPendingRequests(): Promise<PendingRequestDTO[]> {
+    return this.request<PendingRequestDTO[]>({ method: 'GET', url: '/verification/pending' });
+  }
+
+  /** API-038 history, newest first. */
+  async getHistory(page = 1, limit = 50): Promise<HistoryRecordDTO[]> {
+    return this.request<HistoryRecordDTO[]>({ method: 'GET', url: '/verification/history', params: { page, limit } });
+  }
+
+  /** API-039 (FR-030): hide one entry from this user's history (SP log kept, BR-023). */
+  async deleteHistoryEntry(requestId: string): Promise<void> {
+    await this.request<unknown>({ method: 'DELETE', url: `/verification/history/${encodeURIComponent(requestId)}` });
+  }
+
+  /** API-040 (FR-030): clear this user's history. */
+  async clearHistory(): Promise<void> {
+    await this.request<unknown>({ method: 'DELETE', url: '/verification/history' });
+  }
+
+  /** API-037 (FR-025): no valid credential carries the requested predicate. */
+  async failVerification(requestId: string): Promise<void> {
+    await this.request<unknown>({ method: 'POST', url: `/verification/fail/${encodeURIComponent(requestId)}` });
+  }
+
+  async checkRevocation(credentialId: string): Promise<{ revoked?: boolean; status?: string }> {
+    return this.request({ method: 'GET', url: `/credentials/${encodeURIComponent(credentialId)}/revocation` });
+  }
+
+  async nadraVerify(cnic: string, phone: string): Promise<{ session_id: string }> {
+    return this.requestLoose({ method: 'POST', url: '/credentials/nadra/verify', data: { cnic, phone } });
+  }
+
+  async nadraVerifyOtp(sessionId: string, otp: string): Promise<{ credential: SDJWTCredential }> {
+    return this.requestLoose({ method: 'POST', url: '/credentials/nadra/verify-otp', data: { session_id: sessionId, otp } });
+  }
+
+  async hecVerify(body: { degree_number: string; university: string; student_name: string }): Promise<{ credential: SDJWTCredential }> {
+    return this.requestLoose({ method: 'POST', url: '/credentials/hec/verify', data: body });
+  }
+
+  async auScrape(body: { username: string; password: string }): Promise<{ credential: SDJWTCredential }> {
+    return this.requestLoose({ method: 'POST', url: '/credentials/au/scrape', data: body, timeout: 60_000 });
+  }
+
+  async linkedinAuthUrl(): Promise<{ auth_url: string }> {
+    return this.requestLoose({ method: 'GET', url: '/credentials/linkedin/auth-url' });
+  }
+
+  async linkedinStatus(): Promise<{ status: string; credential?: SDJWTCredential }> {
+    return this.requestLoose({ method: 'GET', url: '/credentials/linkedin/status' });
+  }
+
   // ── Issuers ───────────────────────────────────────────────────────────────
 
   async getIssuerPublicKey(issuerId: string): Promise<string> {
@@ -286,6 +384,35 @@ class ApiService {
 
     return data.public_key;
   }
+}
+
+/** GET /verification/pending row (verification.service.ts getPendingForUser). */
+export interface PendingRequestDTO {
+  requestId: string;
+  verifierId: string;
+  verifierName: string;
+  verifierDomain: string | null;
+  predicate: string;
+  predicateLabel: string;
+  requestedFields: string[];
+  nonce: string;
+  pageUrl: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** GET /verification/history row (verification.service.ts getHistory). */
+export interface HistoryRecordDTO {
+  requestId: string;
+  verifierId: string;
+  verifierName: string;
+  predicate: string;
+  predicateLabel: string;
+  decidedAt: string | null;
+  outcome: string;
+  issuer: string | null;
+  status: string;
+  created_at: string;
 }
 
 export interface QrChallengeRedeemResult {

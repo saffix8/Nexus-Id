@@ -1,8 +1,13 @@
 import { create } from 'zustand';
 import type { SDJWTCredential } from '@nexusid/types';
+import { getStorage } from '../lib/storage';
+import { errorMessage } from '../lib/wallet';
 
 interface CredentialsState {
   credentials: SDJWTCredential[];
+  /** Credential ids the issuer has revoked (GET /credentials/:id/revocation). */
+  revoked: ReadonlySet<string>;
+  loaded: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -11,83 +16,54 @@ interface CredentialsActions {
   loadCredentials: () => Promise<void>;
   addCredential: (credential: SDJWTCredential) => Promise<void>;
   removeCredential: (id: string) => Promise<void>;
-  refreshCredentials: () => Promise<void>;
+  refreshRevocation: () => Promise<void>;
 }
 
-type CredentialsStore = CredentialsState & CredentialsActions;
-
-export const useCredentialsStore = create<CredentialsStore>()((set, get) => ({
+export const useCredentialsStore = create<CredentialsState & CredentialsActions>()((set, get) => ({
   credentials: [],
+  revoked: new Set<string>(),
+  loaded: false,
   loading: false,
   error: null,
 
   async loadCredentials() {
-    // Guard: don't double-fetch if already loading
     if (get().loading) return;
-
     set({ loading: true, error: null });
     try {
-      const { StorageService } = await import('../services/storage.service');
-      const db = StorageService.getInstance();
+      const db = await getStorage();
       const credentials = await db.getAllCredentials();
-      set({ credentials, loading: false });
+      set({ credentials, loading: false, loaded: true });
+      void get().refreshRevocation();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load credentials';
-      set({ error: message, loading: false });
-      console.error('[CredentialsStore] loadCredentials failed:', err);
+      set({ error: errorMessage(err, 'Could not open the encrypted wallet on this device.'), loading: false, loaded: true });
     }
   },
 
   async addCredential(credential) {
-    set({ loading: true, error: null });
-    try {
-      const { StorageService } = await import('../services/storage.service');
-      const db = StorageService.getInstance();
-      await db.saveCredential(credential);
-      // Optimistic update — append immediately without re-fetching
-      set((state) => ({
-        credentials: [...state.credentials, credential],
-        loading: false,
-      }));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save credential';
-      set({ error: message, loading: false });
-      console.error('[CredentialsStore] addCredential failed:', err);
-      throw err; // Re-throw so callers (screens) can show error UI
-    }
+    const db = await getStorage();
+    await db.saveCredential(credential);
+    set(state => ({ credentials: [...state.credentials.filter(c => c.id !== credential.id), credential] }));
   },
 
   async removeCredential(id) {
-    set({ loading: true, error: null });
-    try {
-      const { StorageService } = await import('../services/storage.service');
-      const db = StorageService.getInstance();
-      await db.deleteCredential(id);
-      // Remove from local state immediately
-      set((state) => ({
-        credentials: state.credentials.filter((c) => c.id !== id),
-        loading: false,
-      }));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete credential';
-      set({ error: message, loading: false });
-      console.error('[CredentialsStore] removeCredential failed:', err);
-      throw err;
-    }
+    const db = await getStorage();
+    await db.deleteCredential(id);
+    set(state => ({ credentials: state.credentials.filter(c => c.id !== id) }));
   },
 
-  async refreshCredentials() {
-    // Force re-fetch regardless of loading state
-    set({ loading: true, error: null });
-    try {
-      const { StorageService } = await import('../services/storage.service');
-      const db = StorageService.getInstance();
-      const credentials = await db.getAllCredentials();
-      set({ credentials, loading: false });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to refresh credentials';
-      set({ error: message, loading: false });
-      console.error('[CredentialsStore] refreshCredentials failed:', err);
-    }
+  async refreshRevocation() {
+    const { apiService } = await import('../services/api.service');
+    const revoked = new Set<string>();
+    await Promise.all(
+      get().credentials.map(async c => {
+        try {
+          const r = await apiService.checkRevocation(c.id);
+          if (r.revoked || r.status === 'revoked') revoked.add(c.id);
+        } catch {
+          // Offline or unknown to the backend — keep showing the local status.
+        }
+      }),
+    );
+    set({ revoked });
   },
 }));

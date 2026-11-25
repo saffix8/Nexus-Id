@@ -98,6 +98,11 @@ function classifyBiometricError(error: unknown): BiometricAuthFailReason {
 // ─── KeystoreService ──────────────────────────────────────────────────────────
 
 class KeystoreService {
+  /** Shared instance — crypto.service.ts calls KeystoreService.getInstance(). */
+  static getInstance(): KeystoreService {
+    return keystoreService;
+  }
+
   /**
    * Creates one ReactNativeBiometrics instance per operation so the biometric
    * prompt title can be customised per call. The instance is stateless.
@@ -207,12 +212,13 @@ class KeystoreService {
    *
    * @param userId   The user whose key should be used.
    * @param data     The UTF-8 string to sign (e.g. JSON-serialised kb+jwt payload).
+   * @param promptMessage  Title of the biometric prompt (e.g. "Approve request from Shop A").
    * @returns        Base64-encoded RSA signature.
    *
    * @throws {KeyNotFoundError}      if no key exists for this userId.
    * @throws {BiometricAuthError}    if the user cancels, fails auth, or is locked out.
    */
-  async signData(userId: string, data: string): Promise<string> {
+  async signData(userId: string, data: string, promptMessage = 'Approve Verification'): Promise<string> {
     const rnBiometrics = this.createRNBiometrics();
 
     // Confirm a key pair exists before showing the biometric prompt
@@ -223,7 +229,7 @@ class KeystoreService {
 
     try {
       const { success, signature, error } = await rnBiometrics.createSignature({
-        promptMessage: 'Approve Verification',
+        promptMessage,
         payload: data,
         // cancelButtonText is Android-only; iOS uses system cancel
         cancelButtonText: 'Cancel',
@@ -340,5 +346,6 @@ class KeystoreService {
 
 // ─── Singleton Export ─────────────────────────────────────────────────────────
 
+export { KeystoreService };
 export const keystoreService = new KeystoreService();
 export default keystoreService;

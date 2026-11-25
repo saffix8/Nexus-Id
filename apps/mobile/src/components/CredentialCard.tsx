@@ -1,68 +1,199 @@
-// apps/mobile/src/components/CredentialCard.tsx
-// React Native equivalent of apps/web/components/CredentialCard.tsx,
-// used inside CredentialListScreen (P2).
+// CredentialCard (mobile) — docs/DESIGN.md §5.1. The identity-document look.
+// Never shows raw attribute values — only predicate labels from packages/types.
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors, spacing, radius, typography } from '../styles/tokens';
-import type { SDJWTCredential } from '@nexusid/types';
+import {
+  Pressable,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import Svg, {
+  Defs,
+  Line,
+  Pattern,
+  RadialGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
+import { predicateLabel, type CredentialType } from '@nexusid/types';
+import { categoryMeta } from '../lib/category';
+import { formatExpiry, truncateId } from '../lib/format';
+import type { CredentialUiStatus } from '../lib/wallet';
+import { alpha, colors, icon, radius, space } from '../styles/tokens';
+import { StatusBadge, Text } from '../ui';
 
-const CREDENTIAL_META = {
-  identity:   { label: 'National Identity', icon: '🆔', accent: colors.credIdentity },
-  education:  { label: 'Education',         icon: '🎓', accent: colors.credEducation },
-  employment: { label: 'Employment',        icon: '💼', accent: colors.credEmployment },
-  enrollment: { label: 'Enrollment',        icon: '🏫', accent: colors.credEnrollment },
-} as const;
+export const CARD_RATIO = 1.586; // ID-1 card
 
-function getStatus(expiresAt: string): 'Active' | 'Expiring Soon' | 'Expired' {
-  const exp = new Date(expiresAt).getTime();
-  const now = Date.now();
-  if (exp < now) return 'Expired';
-  if (exp - now < 30 * 24 * 60 * 60 * 1000) return 'Expiring Soon';
-  return 'Active';
+interface Props {
+  category: CredentialType;
+  status: CredentialUiStatus;
+  predicates: string[];
+  credentialId: string;
+  expiresAt: string;
+  issuerName?: string;
+  width: number;
+  onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
 }
 
-interface CredentialCardProps {
-  credential: SDJWTCredential;
-  onPress: () => void;
-  onLongPress?: () => void;
-}
+export function CredentialCard({
+  category,
+  status,
+  predicates,
+  credentialId,
+  expiresAt,
+  issuerName,
+  width,
+  onPress,
+  style,
+}: Props) {
+  const meta = categoryMeta(category);
+  const { Icon } = meta;
+  const height = width / CARD_RATIO;
+  const revoked = status === 'revoked';
+  const expired = status === 'expired';
+  const issuer = issuerName ?? meta.issuerName;
+  const patternId = `g-${category}`;
+  const glowId = `r-${category}`;
 
-export function CredentialCard({ credential, onPress, onLongPress }: CredentialCardProps) {
-  const meta = CREDENTIAL_META[credential.type];
-  const status = getStatus(credential.expires_at);
-  const statusColor = status === 'Active' ? colors.success : status === 'Expiring Soon' ? colors.warning : colors.danger;
+  const body = (
+    <View style={[s.card, { width, height, opacity: revoked ? 0.6 : 1 }]}>
+      {/* Background: radial glow top-right (8%) + guilloche 45° lines (4%) */}
+      <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
+        <Defs>
+          <RadialGradient
+            id={glowId}
+            cx={width}
+            cy={0}
+            rx={width * 0.75}
+            ry={width * 0.75}
+            gradientUnits="userSpaceOnUse"
+          >
+            <Stop offset="0" stopColor={meta.color} stopOpacity={0.14} />
+            <Stop offset="1" stopColor={meta.color} stopOpacity={0} />
+          </RadialGradient>
+          <Pattern
+            id={patternId}
+            width={10}
+            height={10}
+            patternUnits="userSpaceOnUse"
+            patternTransform="rotate(45)"
+          >
+            <Line
+              x1={0}
+              y1={0}
+              x2={0}
+              y2={10}
+              stroke={meta.color}
+              strokeOpacity={0.06}
+              strokeWidth={1}
+            />
+          </Pattern>
+        </Defs>
+        <Rect width={width} height={height} fill={`url(#${patternId})`} />
+        <Rect width={width} height={height} fill={`url(#${glowId})`} />
+      </Svg>
 
-  return (
-    <TouchableOpacity style={s.card} onPress={onPress} onLongPress={onLongPress} activeOpacity={0.8}>
-      <View style={[s.header, { backgroundColor: `${meta.accent}15` }]}>
-        <View style={s.headerLeft}>
-          <View style={[s.iconBox, { backgroundColor: `${meta.accent}25` }]}>
-            <Text style={{ fontSize: 18 }}>{meta.icon}</Text>
-          </View>
-          <View>
-            <Text style={[s.typeLabel, { color: meta.accent }]}>{meta.label}</Text>
-            <Text style={s.issuer}>{credential.issuer}</Text>
-          </View>
+      {/* Category strip */}
+      <View style={[s.strip, { backgroundColor: meta.color }]} />
+
+      <View style={s.header}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            variant="eyebrow"
+            color={meta.color}
+            style={revoked && s.strike}
+          >
+            {meta.label}
+          </Text>
+          <Text variant="label" numberOfLines={1} style={revoked && s.strike}>
+            {issuer}
+          </Text>
         </View>
-        <View style={[s.statusDot, { backgroundColor: statusColor }]} />
+        <StatusBadge status={status} />
       </View>
-      <View style={s.body}>
-        <Text style={s.status}>{status}</Text>
-        <Text style={s.issuedAt}>Issued {new Date(credential.issued_at).toLocaleDateString()}</Text>
+
+      <View style={s.middle}>
+        <View
+          style={[s.iconTile, { backgroundColor: alpha(meta.color, 0.15) }]}
+        >
+          <Icon
+            size={icon.empty * 0.85}
+            color={meta.color}
+            strokeWidth={icon.stroke}
+          />
+        </View>
       </View>
-    </TouchableOpacity>
+
+      <View style={{ gap: 2 }}>
+        <Text variant="eyebrow">Confirms</Text>
+        <Text variant="bodySmall" color={colors.text} numberOfLines={1}>
+          {predicates.length ? predicates.map(predicateLabel).join(' · ') : '—'}
+        </Text>
+      </View>
+
+      <View style={s.footer}>
+        <Text variant="mono">
+          <Text variant="mono" color={colors.textFaint}>
+            ID{'  '}
+          </Text>
+          {truncateId(credentialId)}
+        </Text>
+        <Text variant="mono" color={expired ? colors.danger : colors.textMuted}>
+          <Text
+            variant="mono"
+            color={expired ? colors.danger : colors.textFaint}
+          >
+            EXPIRES{'  '}
+          </Text>
+          {formatExpiry(expiresAt)}
+        </Text>
+      </View>
+    </View>
+  );
+
+  if (!onPress) return <View style={style}>{body}</View>;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${meta.label} credential from ${issuer}, ${status}, expires ${formatExpiry(expiresAt)}`}
+      accessibilityHint="Opens credential details"
+      style={({ pressed }) => [
+        style,
+        pressed && { transform: [{ scale: 0.99 }] },
+      ]}
+    >
+      {body}
+    </Pressable>
   );
 }
 
 const s = StyleSheet.create({
-  card: { backgroundColor: colors.bgElevated, borderRadius: radius.xl, borderWidth: 1, borderColor: colors.borderSubtle, overflow: 'hidden', marginBottom: spacing[3] },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing[4] },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing[3] },
-  iconBox: { width: 36, height: 36, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  typeLabel: { fontSize: typography.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
-  issuer: { fontSize: typography.sm, color: colors.textPrimary, marginTop: 2 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  body: { paddingHorizontal: spacing[4], paddingBottom: spacing[3], flexDirection: 'row', justifyContent: 'space-between' },
-  status: { fontSize: typography.sm, color: colors.textSecondary },
-  issuedAt: { fontSize: typography.xs, color: colors.textTertiary },
+  card: {
+    borderRadius: radius.credential,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+    padding: space[5],
+    paddingLeft: space[6],
+  },
+  strip: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: space[3] },
+  middle: { flex: 1, justifyContent: 'center' },
+  iconTile: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: space[3],
+  },
+  strike: { textDecorationLine: 'line-through' },
 });

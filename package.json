@@ -4,7 +4,9 @@
   "private": true,
   "description": "Privacy-preserving digital identity verification using Selective Disclosure JWT",
   "workspaces": [
-    "apps/*",
+    "apps/web",
+    "apps/extension",
+    "apps/demo-shop",
     "packages/*",
     "services/*",
     "services/issuers/*"

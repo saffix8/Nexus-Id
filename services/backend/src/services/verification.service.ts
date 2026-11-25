@@ -845,7 +845,8 @@ export class VerificationService {
 
     // Requests routed to this user via pairing (incl. expired ones).
     // Pending requests live on /pending.
-    const where = { userId: user_id, status: { not: "pending" } };
+    // Entries the user deleted (FR-030) are hidden here but kept for the SP log (BR-023).
+    const where = { userId: user_id, status: { not: "pending" }, userDeletedAt: null };
 
     const [total, requests] = await Promise.all([
       prisma.verificationRequest.count({ where }),
@@ -879,6 +880,30 @@ export class VerificationService {
     });
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * API-039 (FR-030): remove one entry from the End User's own history.
+   * Soft delete — the Service Provider log and the audit log keep it (BR-023).
+   */
+  async deleteHistoryEntry(user_id: string, request_id: string): Promise<{ deleted: number }> {
+    const { count } = await prisma.verificationRequest.updateMany({
+      where: { id: request_id, userId: user_id, status: { not: "pending" }, userDeletedAt: null },
+      data: { userDeletedAt: new Date() },
+    });
+    if (count === 0) {
+      throw new VerificationError("History entry not found", "NOT_FOUND", 404);
+    }
+    return { deleted: count };
+  }
+
+  /** API-040 (FR-030): clear the End User's whole history (soft delete, BR-023). */
+  async clearHistory(user_id: string): Promise<{ deleted: number }> {
+    const { count } = await prisma.verificationRequest.updateMany({
+      where: { userId: user_id, status: { not: "pending" }, userDeletedAt: null },
+      data: { userDeletedAt: new Date() },
+    });
+    return { deleted: count };
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────

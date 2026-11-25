@@ -1,8 +1,8 @@
-# ▶ RESUME HERE (updated 2026-11-25, Phase 6)
+# ▶ RESUME HERE (updated 2026-11-25, Phase 7)
 
-**Where we are:** Phases 0 → 5 done. **Phase 6 (mobile wallet) code complete** — see the Phase 6 section below for
-what is verified and what still needs a device run.
-**Next:** run the phone app end to end on the emulator/phone (checklist in the Phase 6 section), then Phase 7.
+**Where we are:** Phases 0 → 5 done, Phase 6 (mobile) code complete (device run still pending),
+**Phase 7 (End User web portal) code complete** — see the Phase 7 section below.
+**Next:** look over the three new web screens in Chrome, run the phone app end to end (Phase 6 checklist), then Phase 8.
 
 ## Demo story status (DEMO_BUILD.md §1)
 
@@ -61,6 +61,57 @@ what is verified and what still needs a device run.
 Uncommitted work = Phase 4 (`apps/demo-shop/`, `dev-start.sh`, root `package.json`) + Phase 5 (below) + tonight's fixes.
 `package-lock.json` changed (adds `@types/chrome` for the new `apps/extension` workspace).
 Suggested: commit Phase 4 and Phase 5 as two commits before starting Phase 6.
+
+---
+
+# NexusID — Phase 7: End User web portal (2026-11-25)
+
+## FR-036 QR sign-in (was not implemented in the backend before)
+- API-023 now accepts `purpose: "SIGN_IN"` → `{ challengeId, code, pollToken, expiresAt, qrPayload }`.
+  QR payload = `<PAIRING_WEB_URL>/pair#p=..&c=..&t=SIGN_IN` (PAIRING links unchanged, no `t`).
+- New table `portal_sign_ins` (migration `portal_sign_in`): pending → approved (API-025) → consumed (API-024).
+  Kept apart from `device_pairings` so an approved sign-in can never route requests.
+- API-025 signs `nexusid-qr:SIGN_IN:<id>:<code>` (purpose-bound: a pairing signature can't sign someone in).
+- API-024 with header `x-challenge-token`: the **first** poll after approval returns `sessionToken` (normal portal JWT,
+  `issueToken` now exported from `web-auth.controller.ts`), atomically marked consumed; later polls get none.
+  Approval must be collected within 60 s. Audit events `portal_sign_in_approved`, `portal_sign_in`.
+- Web: `POST /api/auth?action=qr-start` / `qr-status`. The poll token lives only in the httpOnly cookie
+  `nexusid_qr_signin` (`<challengeId>.<token>`, 180 s); page JS never sees it. On approval the route sets `nexusid_token`.
+- Pairings now store `browser_label` ("Chrome on Linux", from the User-Agent at API-023); API-026 returns `browser`.
+  Older pairings show "Browser extension". `GET /users/me` adds `deviceName` (model from device_info only).
+- Tests: 6 new (SIGN_IN create/poll, purpose binding, wrong token, single use + one-time session, expiry, `browser`)
+  → backend **111/111**. Live end-to-end script through the web route also passed.
+
+## Screens (apps/web)
+- **SCR-013 `/auth/login`** — QR sign-in, WhatsApp Web style: `QRPanel` left (120 s ring), 3 steps right.
+  Auto-refreshes a new code at 0:00, up to 5 times in a row (10 min idle), then "Code expired · New code".
+  Polls every 2 s; "Signed in ✓" then full navigation to `/dashboard` (or `?next=`). Another tab starting a code → message.
+  Links: "Use email and password" → **`/auth/login/password`** (the old form moved there, plus "Sign in with your
+  phone instead"), "Service Provider? Sign in here". FR-037 recovery is **not built**; the "Lost your phone?" link
+  goes to the password sign-in.
+- **SCR-014 `/dashboard`** — KPI row (Credentials · Verifications · Paired browsers), "Paired browsers & devices"
+  (your phone's device key row + each browser with Revoke → AlertDialog → API-027, "Show N revoked"),
+  Recent activity (6 latest, PredicateChip + OutcomeBadge) → View all.
+- **SCR-015 `/dashboard/history`** — table with filter tabs All / Verified / Declined / Expired (with counts),
+  row → side Sheet (outcome, condition + code, requested/answered times, issuer, request ID, "learned only …"),
+  delete one (API-039) and Clear all (API-040), both behind AlertDialog. The old analytics-style page is gone.
+- `/dashboard/pair` (web stand-in for the phone) handles both purposes: "Pair a browser" or "Sign in on another screen".
+- `QRPanel` new props: `showSteps`, `doneLabel`, `qrLabel`. Data hooks in `lib/userApi.ts`.
+  Verification proxy now forwards DELETE.
+
+## Mobile
+- Scanner reads `t=SIGN_IN`, signs with that purpose (prompt "Sign in on your computer"), shows "Signed in".
+
+## How to test QR sign-in without the phone
+1. Signed-in Chrome profile A (End User). Profile B / incognito: open `localhost:3000/auth/login`.
+2. In B's DevTools console: `document.querySelector('[aria-label="NexusID sign-in QR code"]')` is the code; easier:
+   the QR encodes `localhost:3000/pair#p=…&c=…&t=SIGN_IN` — scan it with a phone camera, or copy it from the
+   `qr-start` response in B's Network tab, and open it in profile A → "Sign in" → B opens the dashboard.
+   (Profile A must hold the device key registered for that account — see the per-browser key note above.)
+
+## Not verified
+- No headless browser on this machine: the screens were checked by SSR render + typecheck only, not visually.
+- Phone scan of a SIGN_IN code (needs the Phase 6 device run).
 
 ---
 

@@ -1,6 +1,6 @@
 "use client";
 
-// Landing page for the extension's pairing QR (SRS FR-003).
+// Landing page for NexusID QR links: extension pairing (FR-003) and portal sign-in (FR-036, t=SIGN_IN).
 //
 // A phone camera opens <web origin>/pair#p=..&c=.. . The code lives in the URL
 // fragment, which the login redirect would drop, so it is parked in
@@ -38,11 +38,11 @@ export default function PairLandingPage() {
         {invalid ? (
           <>
             <h1 className="text-base font-semibold text-[#EEF0F6]">
-              Not a valid pairing link
+              Not a valid NexusID code
             </h1>
             <p className="text-xs text-[#8B92A8] mt-2">
-              Open the NexusID extension, choose Pair device, and scan the new
-              QR code.
+              Scan the code again: the one in the NexusID extension, or the one
+              on the sign-in page.
             </p>
             <Link
               href="/dashboard/devices"

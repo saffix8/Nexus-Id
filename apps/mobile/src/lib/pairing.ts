@@ -1,11 +1,15 @@
-// Parses the extension's pairing QR (moved from PairBrowserScreen.tsx, unchanged).
+// Parses a NexusID QR: the extension's pairing code (FR-003) or the web portal's
+// sign-in code (FR-036, SCR-013).
+export type QrPurpose = 'PAIRING' | 'SIGN_IN';
+
 export interface PairingPayload {
   challengeId: string;
   code: string;
+  purpose: QrPurpose;
 }
 
 /**
- * Current form is a web-portal link `<origin>/pair#p=<challengeId>&c=<code>`;
+ * Current form is a web-portal link `<origin>/pair#p=<challengeId>&c=<code>[&t=SIGN_IN]`;
  * the older raw JSON {"v":1,"type":"nexusid-pair","pairingId","code"} is still accepted.
  * Parsed by hand: React Native's URL polyfill lacks full URLSearchParams.
  */
@@ -27,7 +31,13 @@ function parsePairingLink(raw: string): PairingPayload | null {
   }
   const challengeId = fields.p;
   const code = fields.c;
-  return challengeId && code ? { challengeId, code } : null;
+  const purpose: QrPurpose | null =
+    fields.t === undefined || fields.t === 'PAIRING'
+      ? 'PAIRING'
+      : fields.t === 'SIGN_IN'
+        ? 'SIGN_IN'
+        : null;
+  return challengeId && code && purpose ? { challengeId, code, purpose } : null;
 }
 
 export function parsePairingPayload(raw: string): PairingPayload | null {
@@ -39,7 +49,7 @@ export function parsePairingPayload(raw: string): PairingPayload | null {
     const v = value as Record<string, unknown>;
     if (v.v !== 1 || v.type !== 'nexusid-pair') return null;
     if (typeof v.pairingId !== 'string' || typeof v.code !== 'string') return null;
-    return { challengeId: v.pairingId, code: v.code };
+    return { challengeId: v.pairingId, code: v.code, purpose: 'PAIRING' };
   } catch {
     return null;
   }

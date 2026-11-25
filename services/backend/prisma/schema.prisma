@@ -19,6 +19,7 @@ model User {
   updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   credentials          Credential[]
   pairings             DevicePairing[]
+  portalSignIns        PortalSignIn[]
   verificationRequests VerificationRequest[]
 
   @@map("users")
@@ -120,20 +121,20 @@ model VerificationRequest {
 /// BR-015: only the outcome, the condition name, the proof hash and the issuer.
 /// Never claim values.
 model VerificationResult {
-  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  requestId      String              @unique @map("request_id") @db.Uuid
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId  String              @unique @map("request_id") @db.Uuid
   /// VERIFIED | FAILED
-  outcome        String
+  outcome    String
   /// Predicate code the session asked for.
-  condition      String
+  condition  String
   /// Issuer ID of the presented credential; null when no proof was presented (API-037).
-  issuer         String?
+  issuer     String?
   /// SHA-256 of the submitted proof; null when no proof was presented (API-037).
-  proofHash      String?             @map("proof_hash")
+  proofHash  String?             @map("proof_hash")
   /// When the outcome was recorded.
-  verifiedAt     DateTime            @map("verified_at") @db.Timestamptz(6)
-  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  request        VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  verifiedAt DateTime            @map("verified_at") @db.Timestamptz(6)
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  request    VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@index([requestId])
   @@index([verifiedAt(sort: Desc)])
@@ -224,20 +225,44 @@ enum RiskLevel {
 /// mobile app claims it, linking that browser session to the End User.
 /// Only SHA-256 hashes of the QR code and the extension's secret are stored.
 model DevicePairing {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  codeHash   String    @unique @map("code_hash")
-  secretHash String    @unique @map("secret_hash")
-  userId     String?   @map("user_id") @db.Uuid
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codeHash     String    @unique @map("code_hash")
+  secretHash   String    @unique @map("secret_hash")
+  userId       String?   @map("user_id") @db.Uuid
   /// pending | paired | revoked  (an unclaimed row past expiresAt is expired)
-  status     String    @default("pending")
+  status       String    @default("pending")
   /// QR validity window — the code cannot be claimed after this (BR-002)
-  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
-  pairedAt   DateTime? @map("paired_at") @db.Timestamptz(6)
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  pairedAt     DateTime? @map("paired_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  /// "Chrome on Linux" — from the User-Agent that asked for the QR (FR-038 list)
+  browserLabel String?   @map("browser_label")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
   @@map("device_pairings")
+}
+
+/// FR-036 portal sign-in via QR (purpose SIGN_IN on API-023/024/025).
+/// Kept apart from DevicePairing so an approved sign-in is never mistaken for
+/// a pairing that requests can be routed through.
+model PortalSignIn {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codeHash     String    @unique @map("code_hash")
+  /// SHA-256 of the poll token the portal holds (CON-007)
+  secretHash   String    @unique @map("secret_hash")
+  userId       String?   @map("user_id") @db.Uuid
+  /// pending | approved | consumed  (an unapproved row past expiresAt is expired)
+  status       String    @default("pending")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  approvedAt   DateTime? @map("approved_at") @db.Timestamptz(6)
+  consumedAt   DateTime? @map("consumed_at") @db.Timestamptz(6)
+  browserLabel String?   @map("browser_label")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("portal_sign_ins")
 }

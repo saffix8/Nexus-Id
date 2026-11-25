@@ -27,6 +27,12 @@ interface QRPanelProps {
   onExpire?: () => void;
   /** "side" for the portal, "below" for the extension popup. */
   layout?: "side" | "below";
+  /** Hide the built-in numbered steps (the page renders its own). */
+  showSteps?: boolean;
+  /** Status text once redeemed: "Paired" (default) or "Signed in". */
+  doneLabel?: string;
+  /** Accessible name of the QR image. */
+  qrLabel?: string;
   className?: string;
 }
 
@@ -51,6 +57,9 @@ export function QRPanel({
   onRefresh,
   onExpire,
   layout = "side",
+  showSteps = true,
+  doneLabel = "Paired",
+  qrLabel = "Pairing QR code",
   className,
 }: QRPanelProps) {
   const initial = Math.max(0, Math.min(ttlSeconds, startRemaining ?? ttlSeconds));
@@ -91,7 +100,7 @@ export function QRPanel({
   const statusLine = expired ? (
     <StatusLine dot="bg-danger" text="Code expired" />
   ) : status === "paired" ? (
-    <StatusLine dot="bg-success" text="Paired" icon />
+    <StatusLine dot="bg-success" text={doneLabel} icon />
   ) : status === "scanned" ? (
     <StatusLine dot="bg-accent-text" text="Scanned, confirming…" pulse />
   ) : (
@@ -146,7 +155,8 @@ export function QRPanel({
                 bgColor="#FFFFFF"
                 fgColor="#0C0E13"
                 className={cn("transition-[filter] duration-200", expired && "blur-md")}
-                aria-label="Pairing QR code"
+                role="img"
+                aria-label={qrLabel}
               />
             )}
             {expired && (
@@ -174,6 +184,7 @@ export function QRPanel({
         </span>
       </div>
 
+      {showSteps && (
       <ol className={cn("space-y-3", layout === "below" && "w-full")}>
         {STEPS.map((step, i) => (
           <li key={step} className="flex items-center gap-3 text-sm text-text-muted">
@@ -184,6 +195,7 @@ export function QRPanel({
           </li>
         ))}
       </ol>
+      )}
     </Card>
   );
 }

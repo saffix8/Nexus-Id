@@ -69,7 +69,7 @@ class CryptoService {
   // ── 0. signQrChallenge (SRS API-025, ALG-007) ──────────────────────────────
 
   /**
-   * Signs a scanned pairing QR challenge with the hardware-backed device key
+   * Signs a scanned QR challenge (PAIRING or portal SIGN_IN, FR-036) with the hardware-backed device key
    * (biometric prompt), proving to the backend that this registered device
    * redeemed it. The signed string must match qrChallengeSigningInput in
    * services/backend/src/services/qr-challenge.service.ts.
@@ -80,12 +80,13 @@ class CryptoService {
     userId: string,
     challengeId: string,
     code: string,
+    purpose: 'PAIRING' | 'SIGN_IN' = 'PAIRING',
   ): Promise<string> {
     try {
       return await this.keystoreService.signData(
         userId,
-        `nexusid-qr:PAIRING:${challengeId}:${code}`,
-        'Pair this browser',
+        `nexusid-qr:${purpose}:${challengeId}:${code}`,
+        purpose === 'SIGN_IN' ? 'Sign in on your computer' : 'Pair this browser',
       );
     } catch (err) {
       throw new SigningError(err);

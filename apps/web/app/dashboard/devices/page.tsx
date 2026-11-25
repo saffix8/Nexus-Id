@@ -22,7 +22,7 @@ interface PairFormValues {
   pairingCode: string;
 }
 
-const DEVICES_KEY = ["pairing-devices"] as const;
+const DEVICES_KEY = ["pairings"] as const;
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 

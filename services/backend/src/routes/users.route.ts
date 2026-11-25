@@ -74,6 +74,7 @@ router.get(
           email: true,
           name: true,
           publicKey: true,
+          deviceInfo: true,
           createdAt: true,
         },
       });
@@ -83,7 +84,14 @@ router.get(
         return;
       }
 
-      res.status(200).json(success(user));
+      // Only the model name leaves device_info (SCR-014 "Your phone" row).
+      const { deviceInfo, ...rest } = user;
+      const info = (deviceInfo ?? {}) as Record<string, unknown>;
+      const deviceName =
+        typeof info.model === "string" && info.model.trim()
+          ? info.model.trim().slice(0, 64)
+          : null;
+      res.status(200).json(success({ ...rest, deviceName }));
     } catch (err) {
       next(err);
     }

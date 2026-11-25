@@ -114,6 +114,7 @@ export const config = {
     "/dashboard/:path*",
     "/verifier/:path*",
     "/auth/login",
+    "/auth/login/:path*", // password fallback for SCR-013
     "/auth/register",
     "/auth/provider-register",
     "/auth/provider-login",

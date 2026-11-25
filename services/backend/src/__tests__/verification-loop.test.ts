@@ -949,3 +949,99 @@ describe("5 — History delete (API-039/040)", () => {
     await request(app).delete("/api/v1/verification/history").expect(401);
   });
 });
+
+// ─── FR-036 portal sign-in via QR (API-023/024/025, purpose SIGN_IN) ─────────
+
+describe("FR-036 — QR sign-in (SIGN_IN)", () => {
+  async function newSignIn() {
+    const res = await request(app)
+      .post("/api/v1/qr-challenges")
+      .set("x-forwarded-user-agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0 Safari/537.36")
+      .send({ purpose: "SIGN_IN" })
+      .expect(201);
+    return res.body.data as {
+      challengeId: string;
+      code: string;
+      pollToken: string;
+      qrPayload: string;
+      pairingToken?: string;
+    };
+  }
+
+  function redeem(challengeId: string, code: string, signed: string) {
+    return request(app)
+      .post("/api/v1/qr-challenges/redeem")
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .send({ challengeId, code, signature: sign(signed, userKeys.privateKey) });
+  }
+
+  function poll(challengeId: string, token: string) {
+    return request(app)
+      .get(`/api/v1/qr-challenges/${challengeId}`)
+      .set("x-challenge-token", token);
+  }
+
+  it("creates a SIGN_IN code with a poll token and a typed QR link", async () => {
+    const c = await newSignIn();
+    expect(c.pollToken).toEqual(expect.any(String));
+    expect(c.pairingToken).toBeUndefined();
+    expect(c.qrPayload).toMatch(/\/pair#p=.+&c=.+&t=SIGN_IN$/);
+
+    const s = await poll(c.challengeId, c.pollToken).expect(200);
+    expect(s.body.data.state).toBe("PENDING");
+    expect(s.body.data.sessionToken).toBeUndefined();
+  });
+
+  it("refuses a PAIRING signature on a SIGN_IN code (purpose binding) — 401", async () => {
+    const c = await newSignIn();
+    await redeem(c.challengeId, c.code, `nexusid-qr:PAIRING:${c.challengeId}:${c.code}`).expect(401);
+  });
+
+  it("refuses a wrong poll token — 404", async () => {
+    const c = await newSignIn();
+    await poll(c.challengeId, "not-the-token").expect(404);
+  });
+
+  it("phone approves → the first poll gets a session once; the code is single-use", async () => {
+    const c = await newSignIn();
+    const r = await redeem(c.challengeId, c.code, `nexusid-qr:SIGN_IN:${c.challengeId}:${c.code}`).expect(200);
+    expect(r.body.data.purpose).toBe("SIGN_IN");
+
+    const first = await poll(c.challengeId, c.pollToken).expect(200);
+    expect(first.body.data.state).toBe("REDEEMED");
+    expect(first.body.data.sessionToken).toEqual(expect.any(String));
+
+    // The session is a normal portal JWT for this user.
+    const pairings = await request(app)
+      .get("/api/v1/pairings")
+      .set("Authorization", `Bearer ${first.body.data.sessionToken}`)
+      .expect(200);
+    expect(Array.isArray(pairings.body.data)).toBe(true);
+
+    const second = await poll(c.challengeId, c.pollToken).expect(200);
+    expect(second.body.data.sessionToken).toBeUndefined();
+
+    await redeem(c.challengeId, c.code, `nexusid-qr:SIGN_IN:${c.challengeId}:${c.code}`).expect(409);
+    // A sign-in is never a pairing: it must not show up in API-026.
+    expect(pairings.body.data.some((p: { pairingId: string }) => p.pairingId === c.challengeId)).toBe(false);
+  });
+
+  it("rejects an expired code — 410", async () => {
+    const c = await newSignIn();
+    await prisma.portalSignIn.update({
+      where: { id: c.challengeId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    await redeem(c.challengeId, c.code, `nexusid-qr:SIGN_IN:${c.challengeId}:${c.code}`).expect(410);
+    const s = await poll(c.challengeId, c.pollToken).expect(200);
+    expect(s.body.data.state).toBe("EXPIRED");
+  });
+
+  it("API-026 lists the paired browser with its label field", async () => {
+    const res = await request(app)
+      .get("/api/v1/pairings")
+      .set("Authorization", `Bearer ${deviceToken}`)
+      .expect(200);
+    expect(res.body.data[0]).toHaveProperty("browser");
+  });
+});

@@ -4,7 +4,8 @@
 // used while the mobile app is not runnable. The extension's QR encodes a
 // web-portal link:
 //
-//     <web origin>/pair#p=<challengeId>&c=<code>
+//     <web origin>/pair#p=<challengeId>&c=<code>            (PAIRING, extension)
+//     <web origin>/pair#p=<challengeId>&c=<code>&t=SIGN_IN  (FR-036 portal sign-in)
 //
 // Redeeming signs the challenge with this browser's device key (a
 // non-extractable WebCrypto key, lib/webKeypair.ts), so the backend runs the
@@ -16,14 +17,18 @@
 import { z } from "zod";
 import { ensureWebKeypair, getWebSigningKey } from "@/lib/webKeypair";
 
+export type QrPurpose = "PAIRING" | "SIGN_IN";
+
 export interface ScannedChallenge {
   challengeId: string;
   code: string;
+  purpose: QrPurpose;
 }
 
 const ChallengeSchema = z.object({
   challengeId: z.string().uuid(),
   code: z.string().min(1).max(256),
+  purpose: z.enum(["PAIRING", "SIGN_IN"]),
 });
 
 const LegacyJsonSchema = z.object({
@@ -40,11 +45,11 @@ export const PENDING_PAIRING_KEY = "nexusid_pending_pairing";
  * What the device signs to redeem a pairing challenge (ALG-007). Must match
  * qrChallengeSigningInput in services/backend/src/services/qr-challenge.service.ts.
  */
-function signingInput(challengeId: string, code: string): string {
-  return `nexusid-qr:PAIRING:${challengeId}:${code}`;
+function signingInput({ purpose, challengeId, code }: ScannedChallenge): string {
+  return `nexusid-qr:${purpose}:${challengeId}:${code}`;
 }
 
-/** Parses the fragment of a pairing link: `p=<id>&c=<code>` (leading `#` optional). */
+/** Parses the fragment of a QR link: `p=<id>&c=<code>[&t=SIGN_IN]` (leading `#` optional). */
 export function parsePairingFragment(
   fragment: string,
 ): ScannedChallenge | null {
@@ -52,6 +57,7 @@ export function parsePairingFragment(
   const parsed = ChallengeSchema.safeParse({
     challengeId: params.get("p"),
     code: params.get("c"),
+    purpose: params.get("t") ?? "PAIRING",
   });
   return parsed.success ? parsed.data : null;
 }
@@ -72,6 +78,7 @@ export function parsePairingInput(raw: string): ScannedChallenge | null {
     const parsed = ChallengeSchema.safeParse({
       challengeId: legacy.data.pairingId,
       code: legacy.data.code,
+      purpose: "PAIRING",
     });
     return parsed.success ? parsed.data : null;
   }
@@ -106,14 +113,15 @@ async function signChallenge(challenge: ScannedChallenge): Promise<string> {
   const signature = await crypto.subtle.sign(
     { name: "RSASSA-PKCS1-v1_5" },
     key.privateKey,
-    new TextEncoder().encode(
-      signingInput(challenge.challengeId, challenge.code),
-    ),
+    new TextEncoder().encode(signingInput(challenge)),
   );
   return toBase64(signature);
 }
 
-/** API-025: redeems the scanned code, linking the extension to this account. */
+/**
+ * API-025: redeems the scanned code — PAIRING links the extension to this
+ * account; SIGN_IN approves the portal sign-in shown on another screen (FR-036).
+ */
 export async function redeemPairingChallenge(
   challenge: ScannedChallenge,
 ): Promise<void> {
@@ -123,10 +131,17 @@ export async function redeemPairingChallenge(
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...challenge, signature }),
+    body: JSON.stringify({
+      challengeId: challenge.challengeId,
+      code: challenge.code,
+      signature,
+    }),
   });
   const json = (await res.json()) as { success: boolean; error?: string };
   if (!res.ok || !json.success) {
-    throw new Error(json.error ?? "Pairing failed");
+    throw new Error(
+      json.error ??
+        (challenge.purpose === "SIGN_IN" ? "Sign-in failed" : "Pairing failed"),
+    );
   }
 }

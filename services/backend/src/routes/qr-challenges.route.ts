@@ -25,7 +25,7 @@ const router = Router();
 const IdSchema = z.string().uuid("Invalid challenge ID");
 
 const CreateSchema = z.object({
-  purpose: z.enum(QR_CHALLENGE_PURPOSES, "purpose must be PAIRING"),
+  purpose: z.enum(QR_CHALLENGE_PURPOSES, "purpose must be PAIRING or SIGN_IN"),
 });
 
 const RedeemSchema = z.object({
@@ -34,7 +34,12 @@ const RedeemSchema = z.object({
   signature: z.string().min(1, "signature is required").max(2048),
 });
 
-const TokenSchema = z.string().min(1, `Missing ${PAIRING_TOKEN_HEADER} header`);
+/** SIGN_IN poll token header (the portal); PAIRING keeps x-pairing-token. */
+const CHALLENGE_TOKEN_HEADER = "x-challenge-token";
+
+const TokenSchema = z
+  .string()
+  .min(1, `Missing ${CHALLENGE_TOKEN_HEADER} or ${PAIRING_TOKEN_HEADER} header`);
 
 function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);
@@ -46,15 +51,20 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown): T {
   return parsed.data;
 }
 
-// API-023 — the extension requests a new pairing QR code (FR-031).
-// Unauthenticated: the extension has no account; the returned pairing token
-// is its credential from here on.
+// API-023 — a new QR code: PAIRING for the extension (FR-031), SIGN_IN for
+// the web portal's QR sign-in (FR-036). Unauthenticated: neither has an
+// account session yet; the returned pairing/poll token is its credential.
+// The browser label ("Chrome on Linux") comes from the User-Agent; the portal
+// proxies server-side, so it forwards the browser's in x-forwarded-user-agent.
 router.post(
   "/",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { purpose } = parseOrThrow(CreateSchema, req.body);
-      const result = await qrChallengeService.create(purpose);
+      const result = await qrChallengeService.create(
+        purpose,
+        req.header("x-forwarded-user-agent") ?? req.header("user-agent"),
+      );
       res.status(201).json(success(result));
     } catch (err) {
       next(err);
@@ -81,7 +91,7 @@ router.post(
   },
 );
 
-// API-024 — the extension polls the challenge state with its pairing token.
+// API-024 — the extension (pairing token) or the portal (poll token) polls.
 router.get(
   "/:id",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -89,7 +99,9 @@ router.get(
       const id = parseOrThrow(IdSchema, req.params.id);
       const token = parseOrThrow(
         TokenSchema,
-        req.header(PAIRING_TOKEN_HEADER) ?? "",
+        req.header(CHALLENGE_TOKEN_HEADER) ??
+          req.header(PAIRING_TOKEN_HEADER) ??
+          "",
       );
       const result = await qrChallengeService.getStatus(id, token);
       res.status(200).json(success(result));

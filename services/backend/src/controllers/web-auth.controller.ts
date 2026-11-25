@@ -45,7 +45,8 @@ const WebLoginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
-async function issueToken(user: { id: string; email: string | null; name: string | null }) {
+/** End User web-portal session JWT. Also used by FR-036 QR sign-in (qr-challenge.service.ts). */
+export async function issueToken(user: { id: string; email: string | null; name: string | null }) {
   const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET ?? '');
   const expiresInSeconds = parseExpiry(process.env.JWT_EXPIRES_IN ?? '7d');
   const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);

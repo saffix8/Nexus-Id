@@ -16,6 +16,8 @@ export const PAIRING_TOKEN_HEADER = "x-pairing-token";
 export interface Pairing {
   pairingId: string;
   status: "paired" | "revoked";
+  /** "Chrome on Linux", from the browser that showed the QR; null if unknown. */
+  browser: string | null;
   pairedAt: string | null;
   revokedAt: string | null;
 }
@@ -45,6 +47,7 @@ class PairingService {
     return rows.map((r) => ({
       pairingId: r.id,
       status: r.status as "paired" | "revoked",
+      browser: r.browserLabel,
       pairedAt: r.pairedAt?.toISOString() ?? null,
       revokedAt: r.revokedAt?.toISOString() ?? null,
     }));

@@ -1,203 +1,442 @@
-// apps/web/app/dashboard/page.tsx
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+// SCR-014 — End User dashboard (FR-038), Linear style:
+//   KPI row (credentials · verifications · paired browsers)
+//   Paired browsers & devices, each browser with Revoke (API-026 / API-027)
+//   Recent activity (API-038, newest first) → full list on SCR-015.
+// Times are relative and computed only on the client (useNow) — no hydration mismatch.
 
-interface DashboardSummary {
-  credentialCount: number;
-  verificationsThisMonth: number;
-  lastVerifiedAt: string | null;
-  expiringCount: number;
-  recentActivity: {
-    id: string;
-    verifierId: string;
-    status: string;
-    createdAt: string;
-  }[];
+import { useState } from "react";
+import Link from "next/link";
+import { format, formatDistanceStrict } from "date-fns";
+import {
+  ArrowRight,
+  History,
+  Loader2,
+  Monitor,
+  MonitorSmartphone,
+  Plus,
+  Smartphone,
+  Unlink,
+  WalletCards,
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { EmptyState } from "@/components/nexus/EmptyState";
+import { ErrorState } from "@/components/nexus/ErrorState";
+import {
+  OutcomeBadge,
+  outcomeStateFromVerification,
+} from "@/components/nexus/OutcomeBadge";
+import { PredicateChip } from "@/components/nexus/PredicateChip";
+import { StatCard } from "@/components/nexus/StatCard";
+import { truncateId } from "@/components/nexus/format";
+import { useNow } from "@/hooks/use-now";
+import {
+  useActiveCredentialCount,
+  useHistory,
+  useMe,
+  usePairings,
+  useRevokePairing,
+  type Pairing,
+} from "@/lib/userApi";
+
+const RECENT = 6;
+
+function relative(iso: string | null, now: number | null): string {
+  if (!iso) return "—";
+  if (now === null) return "…";
+  const t = new Date(iso).getTime();
+  return now - t < 10_000
+    ? "just now"
+    : formatDistanceStrict(t, now, { addSuffix: true });
 }
 
-function StatCard({
-  title,
-  value,
-  warning,
-}: {
-  title: string;
-  value: string | number;
-  warning?: boolean;
-}) {
+function browserName(p: Pairing) {
+  return p.browser ?? "Browser extension";
+}
+
+export default function DashboardPage() {
+  const now = useNow();
+  const credentials = useActiveCredentialCount();
+  const pairings = usePairings();
+  const history = useHistory();
+
+  const active = pairings.data?.filter((p) => p.status === "paired") ?? [];
+  const entries = history.data ?? [];
+  const verified = entries.filter((e) => e.outcome === "VERIFIED").length;
+
   return (
-    <div className="bg-[#13161E] border border-[#1E2330] rounded-xl p-5 flex flex-col gap-2">
-      <span className="text-[10px] font-mono tracking-wider uppercase text-[#525A72]">{title}</span>
-      <span
-        className="text-3xl font-semibold tracking-tight"
-        style={{
-          fontFamily: 'DM Sans, sans-serif',
-          color: warning ? '#F59E0B' : '#EEF0F6',
-        }}
-      >
-        {value}
-      </span>
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-1">
+          <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">
+            Overview
+          </h2>
+          <p className="text-sm text-text-muted">
+            Your credentials stay on your phone. This page shows what you shared
+            and who can ask.
+          </p>
+        </div>
+        <Button asChild className="gap-1.5">
+          <Link href="/dashboard/credentials">
+            <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
+            Add credential
+          </Link>
+        </Button>
+      </div>
+
+      {/* KPI row */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          label="Credentials"
+          icon={WalletCards}
+          loading={credentials.isLoading}
+          value={credentials.isError ? "—" : credentials.data}
+          hint={
+            credentials.isError ? "Couldn't load" : "Active, on your device"
+          }
+        />
+        <StatCard
+          label="Verifications"
+          icon={History}
+          loading={history.isLoading}
+          value={history.isError ? "—" : entries.length}
+          hint={
+            history.isError
+              ? "Couldn't load"
+              : `${verified} verified · ${entries.length - verified} not shared`
+          }
+        />
+        <StatCard
+          label="Paired browsers"
+          icon={MonitorSmartphone}
+          loading={pairings.isLoading}
+          value={pairings.isError ? "—" : active.length}
+          hint={pairings.isError ? "Couldn't load" : "Can send you requests"}
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <PairedDevices now={now} />
+        <RecentActivity now={now} />
+      </div>
     </div>
   );
 }
 
-function formatRelative(iso: string | null): string {
-  if (!iso) return 'Never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
+// ── Paired browsers & devices (FR-038) ───────────────────────────────────────
 
-export default function DashboardPage() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [name, setName] = useState<string>('');
+function PairedDevices({ now }: { now: number | null }) {
+  const me = useMe();
+  const pairings = usePairings();
+  const revoke = useRevokePairing();
+  const [target, setTarget] = useState<Pairing | null>(null);
+  const [showRevoked, setShowRevoked] = useState(false);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [res, credRes] = await Promise.all([
-          fetch('/api/v1/verification/history', { credentials: 'include' }),
-          fetch('/api/v1/credentials', { credentials: 'include' }),
-        ]);
-        const json = await res.json();
-        const credJson = (await credRes.json()) as {
-          success: boolean;
-          data?: { status: string; expiresAt: string }[];
-        };
-        const creds = credJson.success && credJson.data ? credJson.data : [];
-        const activeCreds = creds.filter((c) => c.status === 'active');
-        const soon = Date.now() + 30 * 86_400_000;
-        const credentialCount = activeCreds.length;
-        const expiringCount = activeCreds.filter((c) => new Date(c.expiresAt).getTime() < soon).length;
+  const all = pairings.data ?? [];
+  const active = all.filter((p) => p.status === "paired");
+  const revoked = all.filter((p) => p.status === "revoked");
+  const listed = showRevoked ? [...active, ...revoked] : active;
 
-        if (json.success) {
-          const history = json.data as { requestId: string; verifierId: string; verifierName: string; status: string; created_at: string }[];
-          const now = new Date();
-          const thisMonthCount = history.filter((h) => {
-            const d = new Date(h.created_at);
-            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-          }).length;
-
-          setData({
-            credentialCount,
-            verificationsThisMonth: thisMonthCount,
-            lastVerifiedAt: history[0]?.created_at ?? null,
-            expiringCount,
-            recentActivity: history.slice(0, 5).map((h) => ({
-              id: h.requestId,
-              verifierId: h.verifierName,
-              status: h.status,
-              createdAt: h.created_at,
-            })),
-          });
-        } else {
-          setData({ credentialCount: 0, verificationsThisMonth: 0, lastVerifiedAt: null, expiringCount: 0, recentActivity: [] });
-        }
-      } catch {
-        setData({ credentialCount: 0, verificationsThisMonth: 0, lastVerifiedAt: null, expiringCount: 0, recentActivity: [] });
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-6 animate-pulse">
-        <div className="h-8 w-64 bg-[#13161E] rounded" />
-        <div className="grid grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-24 bg-[#13161E] border border-[#1E2330] rounded-xl" />
-          ))}
-        </div>
-      </div>
-    );
+  function confirmRevoke() {
+    if (!target) return;
+    const name = browserName(target);
+    revoke.mutate(target.pairingId, {
+      onSuccess: () => {
+        toast.success(`${name} revoked`, {
+          description: "Its requests no longer reach your phone.",
+        });
+        setTarget(null);
+      },
+      onError: (err) =>
+        toast.error("Couldn't revoke", { description: (err as Error).message }),
+    });
   }
 
-  if (!data) return null;
+  return (
+    <Card className="flex flex-col shadow-none">
+      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5">
+        <div className="space-y-1">
+          <h3 className="font-display text-base font-semibold text-foreground">
+            Paired browsers & devices
+          </h3>
+          <p className="text-sm text-text-muted">
+            Browsers whose NexusID extension can send requests to your phone.
+          </p>
+        </div>
+        <Button asChild variant="secondary" size="sm" className="shrink-0">
+          <Link href="/dashboard/devices">Pair a browser</Link>
+        </Button>
+      </div>
+
+      {/* Your phone — the device key every proof is signed with */}
+      <div className="flex items-center gap-3 border-b border-border-subtle px-5 py-4">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay text-text-muted">
+          <Smartphone
+            className="size-4"
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          {me.isLoading ? (
+            <Skeleton className="h-4 w-40" />
+          ) : (
+            <>
+              <p className="truncate text-sm font-medium text-foreground">
+                {me.data?.deviceName ?? "Your phone"}
+                <span className="ml-2 text-xs font-normal text-text-faint">
+                  this account&apos;s device key
+                </span>
+              </p>
+              <p className="text-xs text-text-muted">
+                {me.data?.publicKey
+                  ? "Signs every proof. The key never leaves the device."
+                  : "No device key yet. Sign in on the NexusID app."}
+              </p>
+            </>
+          )}
+        </div>
+        {!me.isLoading && (
+          <OutcomeBadge state={me.data?.publicKey ? "paired" : "not-paired"} />
+        )}
+      </div>
+
+      {pairings.isLoading ? (
+        <div className="space-y-3 p-5">
+          {[0, 1].map((i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : pairings.isError ? (
+        <ErrorState
+          bare
+          message={(pairings.error as Error).message}
+          onRetry={() => pairings.refetch()}
+          retrying={pairings.isFetching}
+        />
+      ) : listed.length === 0 ? (
+        <EmptyState
+          bare
+          icon={Unlink}
+          title="No paired browsers"
+          description="Open the NexusID extension in Chrome and scan its code with your phone."
+          action={{ label: "Pair a browser", href: "/dashboard/devices" }}
+        />
+      ) : (
+        <ul className="divide-y divide-border-subtle">
+          {listed.map((p) => {
+            const isActive = p.status === "paired";
+            const when = isActive ? p.pairedAt : p.revokedAt;
+            return (
+              <li
+                key={p.pairingId}
+                className="flex items-center gap-3 px-5 py-3.5"
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay text-text-muted">
+                  <Monitor
+                    className="size-4"
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={
+                      isActive
+                        ? "truncate text-sm font-medium text-foreground"
+                        : "truncate text-sm text-text-muted"
+                    }
+                  >
+                    {browserName(p)}
+                  </p>
+                  <p className="flex items-center gap-2 text-xs text-text-muted">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={0} className="cursor-default">
+                          {isActive ? "Paired" : "Revoked"}{" "}
+                          {relative(when, now)}
+                        </span>
+                      </TooltipTrigger>
+                      {when && (
+                        <TooltipContent>
+                          {now === null
+                            ? ""
+                            : format(new Date(when), "d MMM yyyy, HH:mm")}
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                    <span className="font-mono text-text-faint">
+                      {truncateId(p.pairingId, 8, 4)}
+                    </span>
+                  </p>
+                </div>
+                {isActive ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 text-danger hover:bg-danger/10 hover:text-danger"
+                    onClick={() => setTarget(p)}
+                  >
+                    Revoke
+                  </Button>
+                ) : (
+                  <OutcomeBadge state="revoked" />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {revoked.length > 0 && !pairings.isError && (
+        <div className="mt-auto border-t border-border-subtle px-5 py-3">
+          <button
+            type="button"
+            onClick={() => setShowRevoked((v) => !v)}
+            className="text-xs text-text-muted hover:text-foreground"
+          >
+            {showRevoked ? "Hide revoked" : `Show ${revoked.length} revoked`}
+          </button>
+        </div>
+      )}
+
+      <AlertDialog
+        open={target !== null}
+        onOpenChange={(o) => !revoke.isPending && !o && setTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Revoke {target ? browserName(target) : "this browser"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Requests from that browser stop reaching your phone immediately.
+              You can pair it again any time with a new code.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revoke.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault(); // stay open until the request finishes
+                confirmRevoke();
+              }}
+              disabled={revoke.isPending}
+              className="bg-danger text-white hover:bg-danger/90"
+            >
+              {revoke.isPending && (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              )}
+              {revoke.isPending ? "Revoking…" : "Revoke"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  );
+}
+
+// ── Recent activity (FR-028) ─────────────────────────────────────────────────
+
+function RecentActivity({ now }: { now: number | null }) {
+  const history = useHistory();
+  const recent = (history.data ?? []).slice(0, RECENT);
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight" style={{ color: '#EEF0F6', fontFamily: 'DM Sans, sans-serif' }}>
-          Welcome back
-        </h1>
-        <Link
-          href="/dashboard/credentials"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-          style={{ background: 'linear-gradient(135deg, #3B6FE8, #5B4FE8)' }}
+    <Card className="flex flex-col shadow-none">
+      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5">
+        <div className="space-y-1">
+          <h3 className="font-display text-base font-semibold text-foreground">
+            Recent activity
+          </h3>
+          <p className="text-sm text-text-muted">
+            Who asked, what they asked, and the outcome. Never your data.
+          </p>
+        </div>
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="shrink-0 gap-1 text-text-muted hover:text-foreground"
         >
-          + Add Credential
-        </Link>
+          <Link href="/dashboard/history">
+            View all
+            <ArrowRight
+              className="size-3.5"
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+          </Link>
+        </Button>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard title="Total Credentials" value={data.credentialCount} />
-        <StatCard title="Verifications This Month" value={data.verificationsThisMonth} />
-        <StatCard title="Last Verified" value={formatRelative(data.lastVerifiedAt)} />
-        <StatCard title="Expiring Soon" value={data.expiringCount} warning={data.expiringCount > 0} />
-      </div>
-
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2 bg-[#13161E] border border-[#1E2330] rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-[#EEF0F6]">My Credentials</h2>
-            <Link href="/dashboard/credentials" className="text-xs text-[#3B6FE8] hover:text-[#4A7EF7]">
-              View all →
-            </Link>
-          </div>
-
-          {data.credentialCount === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-[#1A1E28] border border-[#252C3D] flex items-center justify-center mb-4 text-3xl">
-                🆔
-              </div>
-              <p className="text-sm font-medium text-[#EEF0F6] mb-1">No credentials yet</p>
-              <p className="text-xs text-[#8B92A8] max-w-xs mb-4">
-                Connect NADRA, HEC, your university, or LinkedIn to start proving things about yourself without oversharing.
-              </p>
-              <Link
-                href="/dashboard/credentials"
-                className="text-sm px-4 py-2 rounded-lg border transition-colors"
-                style={{ borderColor: '#252C3D', color: '#8B92A8' }}
+      {history.isLoading ? (
+        <div className="space-y-3 p-5">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      ) : history.isError ? (
+        <ErrorState
+          bare
+          message={(history.error as Error).message}
+          onRetry={() => history.refetch()}
+          retrying={history.isFetching}
+        />
+      ) : recent.length === 0 ? (
+        <EmptyState
+          bare
+          icon={History}
+          title="Nothing shared yet"
+          description="When a site asks you to prove something, it shows up here."
+        />
+      ) : (
+        <ul className="divide-y divide-border-subtle">
+          {recent.map((e) => (
+            <li key={e.requestId} className="flex items-center gap-3 px-5 py-3">
+              <span
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay font-display text-sm font-semibold text-foreground"
+                aria-hidden="true"
               >
-                Add your first credential
-              </Link>
-            </div>
-          ) : (
-            <p className="text-sm text-[#8B92A8]">Credential list renders here.</p>
-          )}
-        </div>
-
-        <div className="bg-[#13161E] border border-[#1E2330] rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-[#EEF0F6]">Recent Activity</h2>
-            <Link href="/dashboard/history" className="text-xs text-[#3B6FE8] hover:text-[#4A7EF7]">
-              View history →
-            </Link>
-          </div>
-
-          {data.recentActivity.length === 0 ? (
-            <p className="text-xs text-[#525A72]">No verifications yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {data.recentActivity.map((item) => (
-                <li key={item.id} className="flex items-center justify-between text-sm">
-                  <span className="text-[#8B92A8] truncate">{item.verifierId}</span>
-                  <span className="text-xs text-[#525A72] shrink-0 ml-2">{formatRelative(item.createdAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
+                {e.verifierName.trim()[0]?.toUpperCase() ?? "?"}
+              </span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {e.verifierName}
+                </p>
+                <PredicateChip code={e.predicate} />
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <OutcomeBadge state={outcomeStateFromVerification(e.outcome)} />
+                <span className="text-xs text-text-muted">
+                  {relative(e.created_at, now)}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

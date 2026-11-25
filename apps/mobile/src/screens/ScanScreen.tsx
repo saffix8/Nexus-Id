@@ -23,7 +23,7 @@ import {
 } from 'react-native-vision-camera';
 import { Camera as CameraIcon, CircleX, Link2, X } from 'lucide-react-native';
 import { apiService, ApiError } from '../services/api.service';
-import { parsePairingPayload } from '../lib/pairing';
+import { parsePairingPayload, type QrPurpose } from '../lib/pairing';
 import { useAuthStore } from '../store/auth.store';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, space } from '../styles/tokens';
@@ -34,8 +34,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Scan'>;
 
 type Phase =
   | { kind: 'scanning' }
-  | { kind: 'claiming' }
-  | { kind: 'paired' }
+  | { kind: 'claiming'; purpose: QrPurpose }
+  | { kind: 'paired'; purpose: QrPurpose }
   | { kind: 'error'; message: string };
 
 export function ScanScreen({ navigation }: Props) {
@@ -58,18 +58,21 @@ export function ScanScreen({ navigation }: Props) {
         setPhase({
           kind: 'error',
           message:
-            'That QR code is not a NexusID pairing code. Open the NexusID extension in your browser and scan the code it shows.',
+            'That QR code is not a NexusID code. Scan the code in the NexusID extension, or the one on the NexusID sign-in page.',
         });
         return;
       }
       if (!userId) {
         setPhase({
           kind: 'error',
-          message: 'Sign in to NexusID before pairing a browser.',
+          message:
+            payload.purpose === 'SIGN_IN'
+              ? 'Sign in to the NexusID app first, then scan the code on your computer.'
+              : 'Sign in to NexusID before pairing a browser.',
         });
         return;
       }
-      setPhase({ kind: 'claiming' });
+      setPhase({ kind: 'claiming', purpose: payload.purpose });
       try {
         const { default: cryptoService, SigningError } =
           await import('../services/crypto.service');
@@ -78,13 +81,15 @@ export function ScanScreen({ navigation }: Props) {
             userId,
             payload.challengeId,
             payload.code,
+            payload.purpose,
           );
           await apiService.redeemQrChallenge(
             payload.challengeId,
             payload.code,
             signature,
           );
-          setPhase({ kind: 'paired' }); // FR-003 AC1 — confirm on the device
+          // FR-003 AC1 / FR-036 — confirm on the device
+          setPhase({ kind: 'paired', purpose: payload.purpose });
         } catch (err) {
           // 400 invalid, 401 bad signature, 409 already used, 410 expired — the server says which.
           const message =
@@ -152,11 +157,12 @@ export function ScanScreen({ navigation }: Props) {
       <Screen style={s.center}>
         <AnimatedCheck size={112} />
         <Text variant="pageTitle" align="center">
-          Browser paired
+          {phase.purpose === 'SIGN_IN' ? 'Signed in' : 'Browser paired'}
         </Text>
         <Text variant="bodySmall" align="center" style={{ maxWidth: 300 }}>
-          Verification requests from that browser now come to this phone. Only
-          the answer is shared. Never your data.
+          {phase.purpose === 'SIGN_IN'
+            ? 'Your computer opens the NexusID dashboard now. No password was needed.'
+            : 'Verification requests from that browser now come to this phone. Only the answer is shared. Never your data.'}
         </Text>
         <Button
           label="Done"
@@ -255,7 +261,8 @@ function Overlay({
               Scan the code in your browser
             </Text>
             <Text variant="bodySmall" align="center" color="#C9CEDB">
-              Open the NexusID extension and point the camera at its QR code.
+              Point the camera at the code in the NexusID extension or on the
+              sign-in page.
             </Text>
           </>
         ) : phase.kind === 'claiming' ? (
@@ -266,7 +273,9 @@ function Overlay({
           >
             <Spinner color={colors.accentText} size={24} />
             <Text variant="label" color={colors.white}>
-              Pairing with your browser…
+              {phase.purpose === 'SIGN_IN'
+                ? 'Signing you in…'
+                : 'Pairing with your browser…'}
             </Text>
           </Animated.View>
         ) : phase.kind === 'error' ? (

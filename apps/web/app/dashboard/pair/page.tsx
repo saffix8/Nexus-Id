@@ -1,19 +1,32 @@
 "use client";
 
-// Approve a browser pairing on the web (SRS FR-003, API-025, ALG-006/007).
+// Approve a scanned NexusID QR on the web (SRS FR-003 / FR-036, API-025, ALG-006/007).
 //
-// Reached from /pair after a phone camera scans the extension's QR. The
-// signed-in End User confirms here; the browser signs the challenge with its
-// device key and calls the same API-025 (POST /qr-challenges/redeem) the
-// NexusID app uses. The extension is polling (API-024) and confirms on its side.
+// Web stand-in for the phone. Reached from /pair after a camera opens the QR link:
+//   PAIRING  — the extension's code: link that browser to this account.
+//   SIGN_IN  — the portal sign-in code (SCR-013): sign that screen in as this user.
+// The browser signs the challenge with its device key and calls the same API-025
+// (POST /qr-challenges/redeem) the NexusID app uses. The other screen is polling
+// API-024 and confirms on its side.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  CircleCheck,
+  LogIn,
+  MonitorSmartphone,
+  QrCode,
+  Unlink,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { truncateId } from "@/components/nexus";
+import {
   PENDING_PAIRING_KEY,
   redeemPairingChallenge,
   parsePairingFragment,
+  type QrPurpose,
   type ScannedChallenge,
 } from "@/lib/pairing";
 
@@ -21,7 +34,48 @@ type Loaded =
   | { kind: "loading" }
   | { kind: "missing" }
   | { kind: "ready"; payload: ScannedChallenge }
-  | { kind: "declined" };
+  | { kind: "declined"; purpose: QrPurpose };
+
+const COPY: Record<
+  QrPurpose,
+  {
+    title: string;
+    question: string;
+    caution: string;
+    action: string;
+    busy: string;
+    done: string;
+    doneBody: string;
+    cancelled: string;
+  }
+> = {
+  PAIRING: {
+    title: "Pair a browser",
+    question: "Allow this browser to send you verification requests?",
+    caution:
+      "Only approve if you just scanned the QR code in your own NexusID extension.",
+    action: "Pair browser",
+    busy: "Pairing…",
+    done: "Browser paired",
+    doneBody:
+      "The extension confirms in a few seconds. Requests from that browser now come to you.",
+    cancelled:
+      "Nothing was linked. The code expires on its own within 2 minutes.",
+  },
+  SIGN_IN: {
+    title: "Sign in on another screen",
+    question: "Sign in to NexusID on the screen showing this code?",
+    caution:
+      "Only approve if you are in front of that screen. Anyone who sees it signed in can view your history.",
+    action: "Sign in",
+    busy: "Signing in…",
+    done: "Signed in",
+    doneBody:
+      "The other screen opens your dashboard in a moment. You can close this page.",
+    cancelled:
+      "Nobody was signed in. The code expires on its own within 2 minutes.",
+  },
+};
 
 /**
  * Reads the scanned code from the URL fragment, or from storage after login.
@@ -61,7 +115,38 @@ function clearPendingPairing(): void {
   }
 }
 
-export default function ApprovePairingPage() {
+function Panel({
+  icon: Icon,
+  tone,
+  title,
+  children,
+}: {
+  icon: typeof QrCode;
+  tone?: "success" | "muted";
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="space-y-4 p-6 shadow-none">
+      <span
+        className={
+          "flex size-12 items-center justify-center rounded-xl border " +
+          (tone === "success"
+            ? "border-success/25 bg-success/10 text-success"
+            : "border-border bg-overlay text-text-muted")
+        }
+      >
+        <Icon className="size-6" strokeWidth={1.75} aria-hidden="true" />
+      </span>
+      <h2 className="font-display text-lg font-semibold text-foreground">
+        {title}
+      </h2>
+      {children}
+    </Card>
+  );
+}
+
+export default function ApproveQrPage() {
   const queryClient = useQueryClient();
   const [state, setState] = useState<Loaded>({ kind: "loading" });
 
@@ -74,117 +159,103 @@ export default function ApprovePairingPage() {
     mutationFn: redeemPairingChallenge,
     onSuccess: () => {
       clearPendingPairing();
-      queryClient.invalidateQueries({ queryKey: ["pairing-devices"] });
+      queryClient.invalidateQueries({ queryKey: ["pairings"] });
     },
   });
 
   return (
-    <div className="max-w-md mx-auto space-y-6">
-      <div>
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          style={{ color: "#EEF0F6", fontFamily: "DM Sans, sans-serif" }}
+    <div className="mx-auto max-w-md space-y-6">
+      {state.kind === "loading" && (
+        <Card className="h-48 animate-pulse shadow-none" aria-busy="true" />
+      )}
+
+      {state.kind === "missing" && (
+        <Panel icon={QrCode} title="No code found">
+          <p className="text-sm text-text-muted">
+            Scan the QR code again: the one in the NexusID extension to pair a
+            browser, or the one on the sign-in page.
+          </p>
+          <Button asChild variant="secondary">
+            <Link href="/dashboard">Go to dashboard</Link>
+          </Button>
+        </Panel>
+      )}
+
+      {state.kind === "declined" && (
+        <Panel icon={Unlink} tone="muted" title="Cancelled">
+          <p className="text-sm text-text-muted">
+            {COPY[state.purpose].cancelled}
+          </p>
+          <Button asChild variant="secondary">
+            <Link href="/dashboard">Go to dashboard</Link>
+          </Button>
+        </Panel>
+      )}
+
+      {state.kind === "ready" && mutation.isSuccess && (
+        <Panel
+          icon={CircleCheck}
+          tone="success"
+          title={COPY[state.payload.purpose].done}
         >
-          Pair a browser
-        </h1>
-        <p className="text-sm text-[#8B92A8] mt-1">
-          Link the Chrome extension you just scanned to your NexusID account.
-        </p>
-      </div>
+          <p className="text-sm text-text-muted">
+            {COPY[state.payload.purpose].doneBody}
+          </p>
+          <Button asChild variant="secondary">
+            <Link href="/dashboard">Go to dashboard</Link>
+          </Button>
+        </Panel>
+      )}
 
-      <div className="bg-[#13161E] border border-[#1E2330] rounded-xl p-6">
-        {state.kind === "loading" && (
-          <p className="text-xs text-[#525A72]">Loading…</p>
-        )}
-
-        {state.kind === "missing" && (
-          <>
-            <p className="text-sm text-[#EEF0F6]">No pairing code found.</p>
-            <p className="text-xs text-[#8B92A8] mt-1">
-              Scan the QR code in the NexusID extension again, or paste its code
-              on the Devices page.
-            </p>
-            <Link
-              href="/dashboard/devices"
-              className="inline-block mt-4 text-xs text-[#3B6FE8] hover:underline"
+      {state.kind === "ready" &&
+        !mutation.isSuccess &&
+        (() => {
+          const copy = COPY[state.payload.purpose];
+          return (
+            <Panel
+              icon={
+                state.payload.purpose === "SIGN_IN" ? LogIn : MonitorSmartphone
+              }
+              title={copy.title}
             >
-              Go to Devices
-            </Link>
-          </>
-        )}
-
-        {state.kind === "declined" && (
-          <>
-            <p className="text-sm text-[#EEF0F6]">Pairing cancelled.</p>
-            <p className="text-xs text-[#8B92A8] mt-1">
-              Nothing was linked. The code expires on its own within 2 minutes.
-            </p>
-          </>
-        )}
-
-        {state.kind === "ready" && mutation.isSuccess && (
-          <>
-            <p className="text-sm text-[#22C55E]">Browser paired.</p>
-            <p className="text-xs text-[#8B92A8] mt-1">
-              The extension will confirm in a few seconds. Verification requests
-              from that browser now come to your account.
-            </p>
-            <Link
-              href="/dashboard/devices"
-              className="inline-block mt-4 text-xs text-[#3B6FE8] hover:underline"
-            >
-              View paired devices
-            </Link>
-          </>
-        )}
-
-        {state.kind === "ready" && !mutation.isSuccess && (
-          <>
-            <p className="text-sm text-[#EEF0F6]">
-              Allow this browser to send you verification requests?
-            </p>
-            <p className="text-xs text-[#8B92A8] mt-1">
-              Only approve if you just scanned the QR code in your own NexusID
-              extension.
-            </p>
-            <p
-              className="text-xs text-[#525A72] mt-3"
-              style={{ fontFamily: "JetBrains Mono, monospace" }}
-            >
-              Pairing · {state.payload.challengeId.slice(0, 8)}
-            </p>
-
-            {mutation.isError && (
-              <p className="text-xs text-[#EF4444] mt-3">
-                {(mutation.error as Error).message}
+              <div className="space-y-1.5">
+                <p className="text-sm text-foreground">{copy.question}</p>
+                <p className="text-sm text-text-muted">{copy.caution}</p>
+              </div>
+              <p className="font-mono text-xs text-text-faint">
+                Code · {truncateId(state.payload.challengeId, 8, 4)}
               </p>
-            )}
-
-            <div className="flex gap-3 mt-5">
-              <button
-                onClick={() => mutation.mutate(state.payload)}
-                disabled={mutation.isPending}
-                className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                style={{
-                  background: "linear-gradient(135deg, #3B6FE8, #5B4FE8)",
-                }}
-              >
-                {mutation.isPending ? "Pairing…" : "Approve"}
-              </button>
-              <button
-                onClick={() => {
-                  clearPendingPairing();
-                  setState({ kind: "declined" });
-                }}
-                disabled={mutation.isPending}
-                className="flex-1 px-4 py-2 rounded-lg text-sm border border-[#252C3D] text-[#8B92A8] transition-colors hover:text-[#EEF0F6] disabled:opacity-50"
-              >
-                Not me
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+              {mutation.isError && (
+                <p role="alert" className="text-sm text-danger">
+                  {(mutation.error as Error).message}
+                </p>
+              )}
+              <div className="flex gap-3 pt-1">
+                <Button
+                  className="flex-1"
+                  onClick={() => mutation.mutate(state.payload)}
+                  disabled={mutation.isPending}
+                >
+                  {mutation.isPending ? copy.busy : copy.action}
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  disabled={mutation.isPending}
+                  onClick={() => {
+                    clearPendingPairing();
+                    setState({
+                      kind: "declined",
+                      purpose: state.payload.purpose,
+                    });
+                  }}
+                >
+                  Not me
+                </Button>
+              </div>
+            </Panel>
+          );
+        })()}
     </div>
   );
 }

@@ -6,39 +6,18 @@
 //   Recent activity (API-038, newest first) → full list on SCR-015.
 // Times are relative and computed only on the client (useNow) — no hydration mismatch.
 
-import { useState } from "react";
 import Link from "next/link";
-import { format, formatDistanceStrict } from "date-fns";
+import { format } from "date-fns";
 import {
   ArrowRight,
   History,
-  Loader2,
-  Monitor,
   MonitorSmartphone,
   Plus,
-  Smartphone,
-  Unlink,
   WalletCards,
 } from "lucide-react";
-import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/nexus/EmptyState";
 import { ErrorState } from "@/components/nexus/ErrorState";
 import {
@@ -47,31 +26,16 @@ import {
 } from "@/components/nexus/OutcomeBadge";
 import { PredicateChip } from "@/components/nexus/PredicateChip";
 import { StatCard } from "@/components/nexus/StatCard";
-import { truncateId } from "@/components/nexus/format";
 import { useNow } from "@/hooks/use-now";
+import { PairedDevices } from "@/components/nexus/PairedDevices";
+import { relativeTime as relative } from "@/components/nexus/time";
 import {
   useActiveCredentialCount,
   useHistory,
-  useMe,
   usePairings,
-  useRevokePairing,
-  type Pairing,
 } from "@/lib/userApi";
 
 const RECENT = 6;
-
-function relative(iso: string | null, now: number | null): string {
-  if (!iso) return "—";
-  if (now === null) return "…";
-  const t = new Date(iso).getTime();
-  return now - t < 10_000
-    ? "just now"
-    : formatDistanceStrict(t, now, { addSuffix: true });
-}
-
-function browserName(p: Pairing) {
-  return p.browser ?? "Browser extension";
-}
 
 export default function DashboardPage() {
   const now = useNow();
@@ -139,221 +103,6 @@ export default function DashboardPage() {
         <RecentActivity now={now} />
       </div>
     </div>
-  );
-}
-
-// ── Paired browsers & devices (FR-038) ───────────────────────────────────────
-
-function PairedDevices({ now }: { now: number | null }) {
-  const me = useMe();
-  const pairings = usePairings();
-  const revoke = useRevokePairing();
-  const [target, setTarget] = useState<Pairing | null>(null);
-  const [showRevoked, setShowRevoked] = useState(false);
-
-  const all = pairings.data ?? [];
-  const active = all.filter((p) => p.status === "paired");
-  const revoked = all.filter((p) => p.status === "revoked");
-  const listed = showRevoked ? [...active, ...revoked] : active;
-
-  function confirmRevoke() {
-    if (!target) return;
-    const name = browserName(target);
-    revoke.mutate(target.pairingId, {
-      onSuccess: () => {
-        toast.success(`${name} revoked`, {
-          description: "Its requests no longer reach your phone.",
-        });
-        setTarget(null);
-      },
-      onError: (err) =>
-        toast.error("Couldn't revoke", { description: (err as Error).message }),
-    });
-  }
-
-  return (
-    <Card className="flex flex-col shadow-none">
-      <div className="flex items-start justify-between gap-4 border-b border-border-subtle p-5">
-        <div className="space-y-1">
-          <h3 className="font-display text-base font-semibold text-foreground">
-            Paired browsers & devices
-          </h3>
-          <p className="text-sm text-text-muted">
-            Browsers whose NexusID extension can send requests to your phone.
-          </p>
-        </div>
-        <Button asChild variant="secondary" size="sm" className="shrink-0">
-          <Link href="/dashboard/devices">Pair a browser</Link>
-        </Button>
-      </div>
-
-      {/* Your phone — the device key every proof is signed with */}
-      <div className="flex items-center gap-3 border-b border-border-subtle px-5 py-4">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay text-text-muted">
-          <Smartphone
-            className="size-4"
-            strokeWidth={1.75}
-            aria-hidden="true"
-          />
-        </span>
-        <div className="min-w-0 flex-1">
-          {me.isLoading ? (
-            <Skeleton className="h-4 w-40" />
-          ) : (
-            <>
-              <p className="truncate text-sm font-medium text-foreground">
-                {me.data?.deviceName ?? "Your phone"}
-                <span className="ml-2 text-xs font-normal text-text-faint">
-                  this account&apos;s device key
-                </span>
-              </p>
-              <p className="text-xs text-text-muted">
-                {me.data?.publicKey
-                  ? "Signs every proof. The key never leaves the device."
-                  : "No device key yet. Sign in on the NexusID app."}
-              </p>
-            </>
-          )}
-        </div>
-        {!me.isLoading && (
-          <OutcomeBadge state={me.data?.publicKey ? "paired" : "not-paired"} />
-        )}
-      </div>
-
-      {pairings.isLoading ? (
-        <div className="space-y-3 p-5">
-          {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : pairings.isError ? (
-        <ErrorState
-          bare
-          message={(pairings.error as Error).message}
-          onRetry={() => pairings.refetch()}
-          retrying={pairings.isFetching}
-        />
-      ) : listed.length === 0 ? (
-        <EmptyState
-          bare
-          icon={Unlink}
-          title="No paired browsers"
-          description="Open the NexusID extension in Chrome and scan its code with your phone."
-          action={{ label: "Pair a browser", href: "/dashboard/devices" }}
-        />
-      ) : (
-        <ul className="divide-y divide-border-subtle">
-          {listed.map((p) => {
-            const isActive = p.status === "paired";
-            const when = isActive ? p.pairedAt : p.revokedAt;
-            return (
-              <li
-                key={p.pairingId}
-                className="flex items-center gap-3 px-5 py-3.5"
-              >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-overlay text-text-muted">
-                  <Monitor
-                    className="size-4"
-                    strokeWidth={1.75}
-                    aria-hidden="true"
-                  />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p
-                    className={
-                      isActive
-                        ? "truncate text-sm font-medium text-foreground"
-                        : "truncate text-sm text-text-muted"
-                    }
-                  >
-                    {browserName(p)}
-                  </p>
-                  <p className="flex items-center gap-2 text-xs text-text-muted">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span tabIndex={0} className="cursor-default">
-                          {isActive ? "Paired" : "Revoked"}{" "}
-                          {relative(when, now)}
-                        </span>
-                      </TooltipTrigger>
-                      {when && (
-                        <TooltipContent>
-                          {now === null
-                            ? ""
-                            : format(new Date(when), "d MMM yyyy, HH:mm")}
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                    <span className="font-mono text-text-faint">
-                      {truncateId(p.pairingId, 8, 4)}
-                    </span>
-                  </p>
-                </div>
-                {isActive ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-danger hover:bg-danger/10 hover:text-danger"
-                    onClick={() => setTarget(p)}
-                  >
-                    Revoke
-                  </Button>
-                ) : (
-                  <OutcomeBadge state="revoked" />
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {revoked.length > 0 && !pairings.isError && (
-        <div className="mt-auto border-t border-border-subtle px-5 py-3">
-          <button
-            type="button"
-            onClick={() => setShowRevoked((v) => !v)}
-            className="text-xs text-text-muted hover:text-foreground"
-          >
-            {showRevoked ? "Hide revoked" : `Show ${revoked.length} revoked`}
-          </button>
-        </div>
-      )}
-
-      <AlertDialog
-        open={target !== null}
-        onOpenChange={(o) => !revoke.isPending && !o && setTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Revoke {target ? browserName(target) : "this browser"}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Requests from that browser stop reaching your phone immediately.
-              You can pair it again any time with a new code.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoke.isPending}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault(); // stay open until the request finishes
-                confirmRevoke();
-              }}
-              disabled={revoke.isPending}
-              className="bg-danger text-white hover:bg-danger/90"
-            >
-              {revoke.isPending && (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              )}
-              {revoke.isPending ? "Revoking…" : "Revoke"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
   );
 }
 

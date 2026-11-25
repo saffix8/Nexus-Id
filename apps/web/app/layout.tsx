@@ -29,7 +29,7 @@ const jetbrainsMono = JetBrains_Mono({
 // ── Metadata (only valid in server components) ────────────────────────────────
 
 export const metadata: Metadata = {
-  title: 'NexusID — Privacy-First Identity Verification',
+  title: { default: 'NexusID', template: '%s · NexusID' },
   description:
     'Prove your identity, degree, or enrollment to any website — without uploading your full documents. Powered by SD-JWT selective disclosure.',
   keywords: [

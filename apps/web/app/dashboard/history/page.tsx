@@ -316,7 +316,7 @@ export default function HistoryPage() {
                 <Detail label="Condition">
                   <span className="flex flex-col items-end gap-1">
                     <PredicateChip code={selected.predicate} />
-                    <span className="font-mono text-xs text-text-faint">
+                    <span className="font-mono text-xs text-text-muted">
                       {selected.predicate}
                     </span>
                   </span>
@@ -372,7 +372,7 @@ export default function HistoryPage() {
                   />
                   Delete from history
                 </Button>
-                <p className="mt-2 text-center text-xs text-text-faint">
+                <p className="mt-2 text-center text-xs text-text-muted">
                   {selected.verifierName} keeps its own record of the outcome.
                 </p>
               </div>

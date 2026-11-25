@@ -9,6 +9,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Loader2, QrCode } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { PENDING_PAIRING_KEY, parsePairingFragment } from "@/lib/pairing";
 
 export default function PairLandingPage() {
@@ -33,28 +36,28 @@ export default function PairLandingPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-[#0C0E13] flex items-center justify-center px-4">
-      <div className="w-full max-w-sm bg-[#13161E] border border-[#1E2330] rounded-xl p-6 text-center">
+    <main className="flex min-h-svh items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-sm p-6 text-center shadow-none">
         {invalid ? (
           <>
-            <h1 className="text-base font-semibold text-[#EEF0F6]">
-              Not a valid NexusID code
-            </h1>
-            <p className="text-xs text-[#8B92A8] mt-2">
-              Scan the code again: the one in the NexusID extension, or the one
-              on the sign-in page.
+            <span className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-overlay text-text-muted">
+              <QrCode className="size-8" strokeWidth={1.75} aria-hidden="true" />
+            </span>
+            <h1 className="mt-4 font-display text-base font-semibold text-foreground">Not a NexusID code</h1>
+            <p className="mt-2 text-sm text-text-muted">
+              Scan the code again: the one in the NexusID extension, or the one on the sign-in page.
             </p>
-            <Link
-              href="/dashboard/devices"
-              className="inline-block mt-4 text-xs text-[#3B6FE8] hover:underline"
-            >
-              Go to Devices
-            </Link>
+            <Button asChild variant="secondary" className="mt-5">
+              <Link href="/dashboard/devices">Go to Devices</Link>
+            </Button>
           </>
         ) : (
-          <p className="text-xs text-[#8B92A8]">Opening NexusID…</p>
+          <p className="flex items-center justify-center gap-2 text-sm text-text-muted" aria-live="polite">
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            Opening NexusID…
+          </p>
         )}
-      </div>
+      </Card>
     </main>
   );
 }

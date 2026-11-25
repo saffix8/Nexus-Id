@@ -475,14 +475,45 @@ function qrView(): Node[] {
     }
   };
 
+  // No phone at hand: copy the pairing link and open it in the signed-in portal (web stand-in, FR-003).
+  const copyLabel = h("span", {}, "Copy code");
+  const copyIcon = h("span", { style: "display:inline-flex" }, icon(I.Copy, 14));
+  const copyBtn = h(
+    "button",
+    {
+      class: "btn sm",
+      type: "button",
+      disabled: !p || ui.busy ? "" : undefined,
+      title: "Copy the pairing link to open in the NexusID portal",
+      onclick: async () => {
+        if (!p) return;
+        try {
+          await navigator.clipboard.writeText(p.qrPayload);
+          copyIcon.replaceChildren(icon(I.Check, 14));
+          copyLabel.textContent = "Copied";
+          announce("Pairing link copied. Open it in the NexusID portal.");
+          setTimeout(() => {
+            copyIcon.replaceChildren(icon(I.Copy, 14));
+            copyLabel.textContent = "Copy code";
+          }, 2000);
+        } catch {
+          copyLabel.textContent = "Couldn't copy";
+        }
+      },
+    },
+    copyIcon,
+    copyLabel,
+  );
+
   return [
     head,
     h("div", { class: "qr-ring" }, ring, square),
     status,
     h(
       "div",
-      { style: "display:flex;justify-content:center;margin-top:10px" },
+      { style: "display:flex;justify-content:center;gap:8px;margin-top:10px" },
       newCodeBtn,
+      copyBtn,
     ),
     steps,
   ];

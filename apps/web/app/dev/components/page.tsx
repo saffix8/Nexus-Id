@@ -3,7 +3,7 @@ import { AppShell } from '@/components/nexus/AppShell';
 import { ComponentGallery } from './ComponentGallery';
 
 export const metadata: Metadata = {
-  title: 'Components · NexusID',
+  title: 'Components',
   robots: { index: false, follow: false },
 };
 

@@ -1,5 +1,8 @@
+import type { Metadata } from 'next';
 import { getSession } from '@/lib/auth';
 import { AppShell } from '@/components/nexus/AppShell';
+
+export const metadata: Metadata = { title: { default: 'Dashboard', template: '%s · NexusID' } };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();

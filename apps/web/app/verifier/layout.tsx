@@ -1,17 +1,8 @@
-'use client';
+import type { Metadata } from 'next';
+import { VerifierShell } from '@/components/nexus/VerifierShell';
 
-import { AppShell } from '@/components/nexus/AppShell';
-import { useVerifierProfile } from '@/lib/verifierApi';
+export const metadata: Metadata = { title: { default: 'Service Provider', template: '%s · NexusID' } };
 
 export default function VerifierLayout({ children }: { children: React.ReactNode }) {
-  const { data: profile } = useVerifierProfile();
-
-  return (
-    <AppShell
-      area="provider"
-      user={{ name: profile?.displayName ?? 'Service Provider', subtitle: profile?.domain }}
-    >
-      {children}
-    </AppShell>
-  );
+  return <VerifierShell>{children}</VerifierShell>;
 }

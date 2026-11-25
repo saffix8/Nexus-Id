@@ -222,7 +222,7 @@ export default function ApproveQrPage() {
                 <p className="text-sm text-foreground">{copy.question}</p>
                 <p className="text-sm text-text-muted">{copy.caution}</p>
               </div>
-              <p className="font-mono text-xs text-text-faint">
+              <p className="font-mono text-xs text-text-muted">
                 Code · {truncateId(state.payload.challengeId, 8, 4)}
               </p>
               {mutation.isError && (

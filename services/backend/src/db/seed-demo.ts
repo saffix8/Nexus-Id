@@ -9,16 +9,20 @@
  *   2. Service Provider "Shop A" with a known API key, a portal login and
  *      AGE_OVER_18 configured (FR-041). Only the API key's SHA-256 is stored.
  *
- * Never deletes data. Safe to run repeatedly.
+ * Never deletes data. Safe to run repeatedly. `npm run demo:reset` reuses it.
  */
 
 import "dotenv/config";
 import { createHash } from "crypto";
+import { pathToFileURL } from "url";
 import bcrypt from "bcryptjs";
 import { importJWK, exportSPKI, type JWK } from "jose";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+/** Lets demo-reset.ts reuse the seeding without running main(). */
+export { prisma as seedPrisma };
 
 export const SHOP_A = {
   displayName: "Shop A",
@@ -60,7 +64,7 @@ async function fetchIssuerKey(jwksUrl: string): Promise<string | null> {
   }
 }
 
-async function seedIssuers(): Promise<void> {
+export async function seedIssuers(): Promise<void> {
   console.log("Issuer registry:");
   for (const issuer of ISSUERS) {
     const jwksUrl = `http://localhost:${issuer.port}/.well-known/jwks.json`;
@@ -97,7 +101,7 @@ async function seedIssuers(): Promise<void> {
   }
 }
 
-async function seedShopA(): Promise<void> {
+export async function seedShopA(): Promise<{ id: string }> {
   const apiKeyHash = createHash("sha256")
     .update(SHOP_A.apiKey, "utf8")
     .digest("hex");
@@ -124,6 +128,7 @@ async function seedShopA(): Promise<void> {
   console.log(`    API key      : ${SHOP_A.apiKey}`);
   console.log(`    Portal login : ${SHOP_A.email} / ${SHOP_A.password}`);
   console.log(`    Predicates   : ${shop.requiredPredicates.join(", ")}`);
+  return { id: shop.id };
 }
 
 async function main(): Promise<void> {
@@ -133,9 +138,12 @@ async function main(): Promise<void> {
   console.log("\nDone.\n");
 }
 
-main()
-  .catch((err) => {
-    console.error("seed:demo failed:", err);
-    process.exitCode = 1;
-  })
-  .finally(() => prisma.$disconnect());
+// Run only when executed directly (`npm run seed:demo`), not when imported.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .catch((err) => {
+      console.error("seed:demo failed:", err);
+      process.exitCode = 1;
+    })
+    .finally(() => prisma.$disconnect());
+}

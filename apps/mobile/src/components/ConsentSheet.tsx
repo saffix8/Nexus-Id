@@ -1,7 +1,7 @@
 // ConsentSheet — docs/DESIGN.md §5.2 (SCR-008). Based on the EUDI wallet
 // "Request → Share" screen and the Microsoft Authenticator approve push.
-import React, { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 import BottomSheet, { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs, type BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, EyeOff, Fingerprint, ShieldCheck, TimerOff, CircleX } from 'lucide-react-native';
@@ -41,6 +41,21 @@ export function ConsentSheet(p: Props) {
   const missing = !p.credential;
   const animationConfigs = useBottomSheetSpringConfigs({ ...motion.sheetSpring, overshootClamping: true });
   const initial = useMemo(() => p.verifierName.trim().charAt(0).toUpperCase() || '?', [p.verifierName]);
+
+  // Announce the countdown at 30 s and 10 s only (DESIGN.md §9), and the expiry.
+  const announced = useRef(new Set<number>());
+  useEffect(() => {
+    for (const mark of [30, 10]) {
+      if (p.remaining <= mark && p.remaining > 0 && !announced.current.has(mark)) {
+        announced.current.add(mark);
+        AccessibilityInfo.announceForAccessibility(`${mark} seconds left to answer ${p.verifierName}`);
+      }
+    }
+    if (p.remaining <= 0 && !announced.current.has(0)) {
+      announced.current.add(0);
+      AccessibilityInfo.announceForAccessibility('Request expired');
+    }
+  }, [p.remaining, p.verifierName]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.72} pressBehavior="none" />,

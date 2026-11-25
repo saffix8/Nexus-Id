@@ -11,6 +11,7 @@
     "migrate": "prisma migrate dev",
     "seed": "ts-node src/db/seed.ts",
     "seed:demo": "tsx src/db/seed-demo.ts",
+    "demo:reset": "tsx src/db/demo-reset.ts",
     "generate": "prisma generate",
     "typecheck": "tsc --noEmit",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand"

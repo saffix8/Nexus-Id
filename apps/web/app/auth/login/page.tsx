@@ -256,7 +256,7 @@ export default function QrSignInPage({
               ))}
             </ol>
 
-            <p className="text-xs text-text-faint">
+            <p className="text-xs text-text-muted">
               The code changes every 2 minutes and works once. NexusID never
               shows it to anyone else.
             </p>

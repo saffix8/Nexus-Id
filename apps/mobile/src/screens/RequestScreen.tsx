@@ -68,7 +68,7 @@ export function RequestScreen({ route, navigation }: Props) {
   if (loadError) {
     return (
       <Screen onBack={navigation.goBack} title="Request">
-        <ErrorState title="Request unavailable" message={loadError} onRetry={() => navigation.goBack()} />
+        <ErrorState title="Request unavailable" message={loadError} onRetry={() => navigation.goBack()} actionLabel="Back to wallet" />
       </Screen>
     );
   }

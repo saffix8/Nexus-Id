@@ -1,8 +1,9 @@
-# ▶ RESUME HERE (updated 2026-11-25, Phase 7)
+# ▶ RESUME HERE (updated 2026-11-25, Phase 8)
 
-**Where we are:** Phases 0 → 5 done, Phase 6 (mobile) code complete (device run still pending),
-**Phase 7 (End User web portal) code complete** — see the Phase 7 section below.
-**Next:** look over the three new web screens in Chrome, run the phone app end to end (Phase 6 checklist), then Phase 8.
+**Where we are:** Phases 0 → 7 done, **Phase 8 (polish) code complete** — see the Phase 8 section below.
+Phase 6 device run is still pending.
+**Next:** look over the new landing page and the rebuilt End User screens in Chrome (no headless browser here, so not
+checked visually), reload the extension, run the phone app end to end, then `npm run demo:reset` before the demo.
 
 ## Demo story status (DEMO_BUILD.md §1)
 
@@ -52,6 +53,8 @@
 - **Stale session cookie:** if the account behind the cookie was deleted, web actions failed with "Record not found".
   `PUT /users/me/public-key` now says "sign out and sign in again"; other routes may still show the generic message.
 - **Device name** in the popup shows "NexusID wallet" for web pairings (no `device_info.model`); the phone app will send it.
+- Pairing without the phone: popup → **Copy code** (under the QR) → paste on `/dashboard/devices` or open the link in
+  the signed-in tab. The DevTools-console workaround in step 6 above is no longer needed.
 - Popup "Open portal" opens `http://localhost:3000` (hard-coded in `apps/extension/src/shared/config.ts`).
 - CLAUDE.md says DB name `nexusid`; it is actually **`nexusid_db`** (tests use `nexusid_db_test`).
 - Dev DB has throwaway `diag…@example.test` users from tonight's API checks, harmless.
@@ -61,6 +64,61 @@
 Uncommitted work = Phase 4 (`apps/demo-shop/`, `dev-start.sh`, root `package.json`) + Phase 5 (below) + tonight's fixes.
 `package-lock.json` changed (adds `@types/chrome` for the new `apps/extension` workspace).
 Suggested: commit Phase 4 and Phase 5 as two commits before starting Phase 6.
+
+---
+
+# NexusID — Phase 8: polish, landing page, demo safety (2026-11-25)
+
+## 1. Landing page + logo
+- `apps/web/app/page.tsx` rewritten per DESIGN.md §6.1: nav · hero "Prove what matters. Hide what doesn't." with
+  `components/landing/HeroCredential.tsx` (NADRA card whose values blur into ✓ predicates / "Never shared"; reduced
+  motion → opacity only) · old way vs NexusID · 3 steps · 4 issuers (predicates from `packages/types`) · verifier
+  CodeBlock · footer "Air University Islamabad · FYP 2026". Server component; only the hero and CodeBlock are client.
+- Logo mark (§10): `scripts/generate-logo.py` (stdlib only, no Pillow) writes `apps/web/app/{icon.svg,favicon.ico,
+  apple-icon.png}`, extension `icons/icon{16,32,48,128}.{png,svg}` (32 added to the manifest) and the Android
+  launcher `mipmap-*/ic_launcher{,_round}.png`. Re-run it after changing the mark.
+- Tab titles "Page · NexusID" everywhere: root template + small `layout.tsx` files with `metadata` next to the
+  client pages. `app/verifier/layout.tsx` is now a server layout around `components/nexus/VerifierShell.tsx`.
+
+## 2. Demo reset
+- `npm run demo:reset` (`services/backend/src/db/demo-reset.ts`), skill `/demo-reset`.
+  Re-seeds issuers + Shop A, deletes every verification session of Shop A and of the demo user (default
+  `admin@nexusid.com`, `-- --email x` for another), plus that user's portal QR sign-ins, then backfills 24 Shop A
+  verifications over 7 days (17 verified, 2 failed, 3 declined, 2 expired, not linked to a user) so the SP chart and
+  log aren't empty. Keeps users, credentials, device keys, pairings, audit logs. `-- --dry-run` shows the counts.
+- `seed-demo.ts` now exports `seedIssuers` / `seedShopA` and only runs `main()` when executed directly.
+- Ran once on the dev DB: 24 test sessions cleared, 1 credential + 1 pairing kept, 24 rows backfilled.
+
+## 3. Rough edges found and fixed
+| Where | Problem | Fix |
+|---|---|---|
+| `apps/web/components/AddCredentialModal.tsx` (whole file) | v1 design: emoji icons, inline hex, gradient buttons, headlessui; success step printed raw attribute values; "Successfully verified" (§8) | Rebuilt on shadcn Dialog + lucide; success shows `CredentialCard` with predicates only; same API calls and masks. A failed local save now shows an error instead of a false success |
+| `apps/web/app/dashboard/credentials/page.tsx` | v1 cards with emoji, "Active" status, raw field names, second h1 under the top bar, gradient button, no Retry | Shared `CredentialCard` (Valid/Expired/Revoked), skeletons, `EmptyState`, `ErrorState` with Retry |
+| `apps/web/app/dashboard/requests/page.tsx` | Showed raw disclosure values ("Age Over 18: true"), minutes countdown, no "Never shared", decline without confirm, "Loading…" text | Web ConsentSheet (§5.2): WILL BE CONFIRMED label + mono code, NEVER SHARED list, m:ss countdown (warning < 30 s, danger < 10 s, announced at 30/10 s), Decline → AlertDialog, expired state, toasts |
+| `apps/web/app/dashboard/devices/page.tsx` | v1 styles, duplicated the dashboard list without browser names or revoke confirm; told users to use a "Copy code instead" button the extension didn't have | Shared `components/nexus/PairedDevices.tsx` (also used by SCR-014) + shadcn paste form |
+| `apps/web/app/auth/login/password/page.tsx`, `auth/register/page.tsx` | Old hexagon logo with gradient, inline hex, `#3B6FE8` small link text, generic errors | `AuthFrame` like the provider pages; specific server-unreachable message |
+| `apps/web/app/pair/page.tsx` | v1 hex styles, `#3B6FE8` small text | Tokens, Card, spinner |
+| `auth/login/page.tsx:259`, `dashboard/pair/page.tsx:225`, `dashboard/history/page.tsx:319,375`, `PairedDevices` | `text-faint` on meaningful text (§9 contrast) | `text-muted` |
+| `apps/extension/src/popup/popup.ts` QR view | No way to pair without the phone except DevTools | "Copy code" button next to "New code" |
+| `apps/extension/popup.html` | Fonts from Google Fonts at runtime (flash on a weak hotspot, §10) | Bundled the app's TTFs in `apps/extension/fonts`, `@font-face` in popup.css |
+| `apps/mobile/src/components/ConsentSheet.tsx` | Countdown not announced (§9) | `announceForAccessibility` at 30 s, 10 s and on expiry |
+| `apps/mobile/src/screens/RequestScreen.tsx:71` | Error button said "Retry" but went back | "Back to wallet" (`ErrorState` got `actionLabel`) |
+| `apps/web/components/QRGenerator.tsx`, `AnalyticsCharts.tsx`, `lib/constants.ts` | Dead v1 code | Deleted |
+
+Checked and already fine: SP dashboard/requirements/API keys, history, QR sign-in, Shop A (copy, banner, states),
+popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-button labels on all three surfaces.
+
+## Checks
+- `npx tsc --noEmit`: web, extension, mobile, backend all pass. `next build` passes (lint + types).
+- Rendered over HTTP: landing, auth pages, SP pages signed in as Shop A, titles, favicons. End User pages not
+  rendered signed in (no password for the demo account here), and nothing checked visually (no headless browser).
+- **Incident:** a `next build` into `apps/web/.next` broke the running dev server ("Cannot find module './3135.js'").
+  Fixed by restarting `next dev` with a fresh `.next` (old one moved to the scratchpad). Always build with
+  `NEXT_DIST_DIR=.next-build npx next build` while the dev server runs.
+
+## Not done
+- `@headlessui/react` is now unused in `apps/web/package.json`; left installed (no dependency changes before the demo).
+- Extension icon / phone launcher need a reload / reinstall to show the new mark.
 
 ---
 

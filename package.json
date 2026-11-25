@@ -23,6 +23,7 @@
     "db:migrate": "npm run migrate --workspace=services/backend",
     "db:seed": "npm run seed --workspace=services/backend",
     "seed:demo": "npm run seed:demo --workspace=services/backend",
+    "demo:reset": "npm run demo:reset --workspace=services/backend --",
     "generate-issuer-keys": "npx ts-node scripts/generate-issuer-keys.ts"
   },
   "devDependencies": {

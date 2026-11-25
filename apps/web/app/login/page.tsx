@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Building2, WalletCards, type LucideIcon } from "lucide-react";
 import { AuthFrame } from "@/components/nexus/AuthFrame";
 
-export const metadata: Metadata = { title: "Sign in · NexusID" };
+export const metadata: Metadata = { title: "Sign in" };
 
 const ROLES: { href: string; icon: LucideIcon; title: string; body: string; cta: string }[] = [
   {

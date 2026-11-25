@@ -25,7 +25,12 @@ export function ProofScreen({ route, navigation }: Props) {
   const { requestId, credentialId } = route.params;
   // Snapshot at mount: the backend drops the request from /pending once answered,
   // and the result screen still needs the verifier and predicate.
-  const [request] = useState(() => useSessionStore.getState().pending.find(p => p.requestId === requestId));
+  // The request approved on SCR-008 travels with the prepared proof: the poller may already have
+  // dropped it from /pending (e.g. it expired while the fingerprint prompt was open).
+  const [request] = useState(() => {
+    const s = useSessionStore.getState();
+    return s.pending.find(p => p.requestId === requestId) ?? (s.prepared?.requestId === requestId ? s.prepared.request : undefined);
+  });
   const credential = useCredentialsStore(s => s.credentials.find(c => c.id === credentialId));
   const revoked = useCredentialsStore(s => s.revoked);
   const userId = useAuthStore(s => s.userId);
@@ -35,6 +40,10 @@ export function ProofScreen({ route, navigation }: Props) {
   const run = useCallback(async () => {
     if (!request || !credential || !userId) {
       setState({ kind: 'failed', step: 'check', reason: 'The request or credential is no longer on this phone.' });
+      return;
+    }
+    if (Date.parse(request.expiresAt) <= Date.now()) {
+      setState({ kind: 'failed', step: 'check', reason: 'This request expired before it was approved. Start the check again on the website.' });
       return;
     }
     try {

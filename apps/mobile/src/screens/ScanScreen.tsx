@@ -2,7 +2,7 @@
 // corners. Pairing signs the challenge with the device key (ALG-007, via
 // crypto.service.ts) and redeems it (API-025).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Linking, Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, {
   FadeIn,
   useAnimatedStyle,
@@ -21,14 +21,28 @@ import {
   type ScannedCode,
   type ScannedObject,
 } from 'react-native-vision-camera';
-import { Camera as CameraIcon, CircleX, Link2, X } from 'lucide-react-native';
+import {
+  Camera as CameraIcon,
+  CircleX,
+  ClipboardPaste,
+  Link2,
+  X,
+} from 'lucide-react-native';
 import { apiService, ApiError } from '../services/api.service';
 import { parsePairingPayload, type QrPurpose } from '../lib/pairing';
 import { useAuthStore } from '../store/auth.store';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, space } from '../styles/tokens';
 import { AnimatedCheck } from '../components/AnimatedCheck';
-import { Button, IconButton, IconTile, Screen, Spinner, Text } from '../ui';
+import {
+  Button,
+  IconButton,
+  IconTile,
+  Screen,
+  Spinner,
+  Text,
+  TextField,
+} from '../ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Scan'>;
 
@@ -38,15 +52,55 @@ type Phase =
   | { kind: 'paired'; purpose: QrPurpose }
   | { kind: 'error'; message: string };
 
+/**
+ * VisionCamera 5's built-in code scanner (useObjectOutput) is iOS-only; on Android it throws
+ * "CameraObjectOutput is not available on Android!" as soon as the screen renders. Until a
+ * barcode-scanner output is added for Android, the phone pairs by pasting the extension's
+ * "Copy code" link, which carries the same payload as the QR.
+ */
+const CAN_SCAN_QR = Platform.OS === 'ios';
+
+function QrCamera({
+  active,
+  onCode,
+}: {
+  active: boolean;
+  onCode: (value: string) => void;
+}) {
+  const objectOutput = useObjectOutput({
+    types: ['qr'],
+    onObjectsScanned: (objects: ScannedObject[]) => {
+      const code = objects.find(
+        o => typeof (o as ScannedCode).value === 'string',
+      ) as ScannedCode | undefined;
+      if (code?.value) onCode(code.value);
+    },
+  });
+  return (
+    <Camera
+      style={StyleSheet.absoluteFill}
+      device="back"
+      isActive={active}
+      outputs={[objectOutput]}
+      resizeMode="cover"
+    />
+  );
+}
+
 export function ScanScreen({ navigation }: Props) {
   const { hasPermission, canRequestPermission, requestPermission } =
     useCameraPermission();
   const [phase, setPhase] = useState<Phase>({ kind: 'scanning' });
+  // No usable camera (emulator, broken camera): paste the link from the extension's
+  // "Copy code" button instead. Same payload as the QR, same signing + redeem path.
+  const [pasteMode, setPasteMode] = useState(!CAN_SCAN_QR);
+  const [pasted, setPasted] = useState('');
   const busy = useRef(false);
   const userId = useAuthStore(s => s.userId);
 
   useEffect(() => {
-    if (!hasPermission && canRequestPermission) void requestPermission();
+    if (CAN_SCAN_QR && !hasPermission && canRequestPermission)
+      void requestPermission();
   }, [hasPermission, canRequestPermission, requestPermission]);
 
   const handle = useCallback(
@@ -111,20 +165,50 @@ export function ScanScreen({ navigation }: Props) {
     [userId],
   );
 
-  const objectOutput = useObjectOutput({
-    types: ['qr'],
-    onObjectsScanned: (objects: ScannedObject[]) => {
-      const code = objects.find(
-        o => typeof (o as ScannedCode).value === 'string',
-      ) as ScannedCode | undefined;
-      if (code?.value) void handle(code.value);
-    },
-  });
-
   const retry = () => {
     busy.current = false;
     setPhase({ kind: 'scanning' });
   };
+
+  if (pasteMode && phase.kind !== 'paired') {
+    return (
+      <Screen
+        onBack={CAN_SCAN_QR ? () => setPasteMode(false) : navigation.goBack}
+        title="Paste code"
+      >
+        <View style={{ gap: space[4] }}>
+          <Text variant="bodySmall">
+            In the NexusID extension, press Copy code under the QR. Then
+            long-press the box below and choose Paste.
+          </Text>
+          <TextField
+            label="Pairing code"
+            value={pasted}
+            onChangeText={t => {
+              setPasted(t);
+              if (phase.kind === 'error') retry();
+            }}
+            placeholder="http://localhost:3000/pair#p=…"
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            mono
+            error={phase.kind === 'error' ? phase.message : undefined}
+          />
+          <Button
+            label={phase.kind === 'claiming' ? 'Pairing…' : 'Pair'}
+            Icon={Link2}
+            loading={phase.kind === 'claiming'}
+            disabled={!pasted.trim() || phase.kind === 'claiming'}
+            onPress={() => {
+              busy.current = false;
+              void handle(pasted);
+            }}
+          />
+        </View>
+      </Screen>
+    );
+  }
 
   if (!hasPermission) {
     return (
@@ -146,6 +230,13 @@ export function ScanScreen({ navigation }: Props) {
                 : Linking.openSettings()
             }
             style={{ alignSelf: 'stretch', marginTop: space[3] }}
+          />
+          <Button
+            label="Paste code instead"
+            Icon={ClipboardPaste}
+            variant="ghost"
+            onPress={() => setPasteMode(true)}
+            style={{ alignSelf: 'stretch' }}
           />
         </View>
       </Screen>
@@ -176,14 +267,19 @@ export function ScanScreen({ navigation }: Props) {
 
   return (
     <View style={s.root}>
-      <Camera
-        style={StyleSheet.absoluteFill}
-        device="back"
-        isActive={phase.kind === 'scanning'}
-        outputs={[objectOutput]}
-        resizeMode="cover"
+      <QrCamera
+        active={phase.kind === 'scanning'}
+        onCode={v => void handle(v)}
       />
-      <Overlay phase={phase} onClose={navigation.goBack} onRetry={retry} />
+      <Overlay
+        phase={phase}
+        onClose={navigation.goBack}
+        onRetry={retry}
+        onPaste={() => {
+          retry();
+          setPasteMode(true);
+        }}
+      />
     </View>
   );
 }
@@ -192,10 +288,12 @@ function Overlay({
   phase,
   onClose,
   onRetry,
+  onPaste,
 }: {
   phase: Phase;
   onClose: () => void;
   onRetry: () => void;
+  onPaste: () => void;
 }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -264,6 +362,13 @@ function Overlay({
               Point the camera at the code in the NexusID extension or on the
               sign-in page.
             </Text>
+            <Button
+              label="Paste code instead"
+              Icon={ClipboardPaste}
+              variant="ghost"
+              size="md"
+              onPress={onPaste}
+            />
           </>
         ) : phase.kind === 'claiming' ? (
           <Animated.View

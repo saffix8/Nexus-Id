@@ -10,7 +10,7 @@ interface SessionState {
   /** Ids already shown or answered — so polling doesn't reopen them. */
   seen: ReadonlySet<string>;
   /** Proof built on Approve (SCR-008), sent by SCR-009. Held in memory only. */
-  prepared: { requestId: string; credentialId: string; proof: Proof } | null;
+  prepared: { requestId: string; credentialId: string; proof: Proof; request: PendingRequestDTO } | null;
   setPrepared: (p: SessionState['prepared']) => void;
   setUnlocked: (v: boolean) => void;
   setPending: (rows: PendingRequestDTO[]) => void;

@@ -10,14 +10,16 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
  */
 const root = path.resolve(__dirname, '../..');
 const local = path.resolve(__dirname, 'node_modules');
+const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const config = {
-  watchFolders: [
-    path.join(root, 'packages/types'),
-  ],
+  watchFolders: [path.join(root, 'packages/types')],
   resolver: {
     nodeModulesPaths: [local],
-    disableHierarchicalLookup: true,
+    // Hierarchical lookup stays ON so nested deps resolve (e.g. reanimated's own
+    // node_modules/semver v7). The root workspace node_modules (React 18) is
+    // blocked instead, so nothing from apps/web's tree can leak into the bundle.
+    blockList: [new RegExp(`^${escape(path.join(root, 'node_modules'))}/.*`)],
   },
 };
 

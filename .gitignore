@@ -53,3 +53,10 @@ services/ml/__pycache__/
 **/__pycache__/
 services/ml/data/
 services/ml/models/
+
+# Android build output (never commit: >100 MB native libs)
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/app/.cxx/
+*.apk

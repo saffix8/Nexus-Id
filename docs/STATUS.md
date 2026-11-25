@@ -1,24 +1,94 @@
 # ▶ RESUME HERE (updated 2026-11-25, Phase 8)
 
-**Where we are:** Phases 0 → 7 done, **Phase 8 (polish) code complete** — see the Phase 8 section below.
-Phase 6 device run is still pending.
-**Next:** look over the new landing page and the rebuilt End User screens in Chrome (no headless browser here, so not
-checked visually), reload the extension, run the phone app end to end, then `npm run demo:reset` before the demo.
+**Where we are:** Phases 0 → 7 done. **Phase 8 (polish) code complete, NOT complete:** the §1 demo-story walkthrough
+(Phase 8 item 3) has not been done.
+**Mobile app (2026-11-25):** debug APK built and installed; **tested end to end on the emulator** (`NexusID_Lite`, API 34):
+sign-in → add NADRA credential (OTP) → Shop A request → approve with fingerprint → proof verified → history;
+browser paired from the phone (Scan → paste the extension's Copy code link; `device_pairings` row `paired`).
+
+- Run: `bash apps/mobile/scripts/emulator.sh` → `cd apps/mobile && nvm use && npx react-native start` → open the app.
+  Rebuild only after native changes: `bash apps/mobile/scripts/build-apk.sh install`.
+- Emulator lock PIN `1234`, fingerprint "finger 1" enrolled; touch it with `adb emu finger touch 1`
+  or Extended controls (⋯) → Fingerprint → Touch sensor.
+- Fixed tonight: Quick Boot snapshots wrote 560 MB/s to disk and froze the laptop → `-no-snapshot` (cold boot ~52 s).
+  `metro.config.js` blocked nested node_modules (reanimated's semver) → now blocks the root node_modules instead.
+  Sign-out → sign-in gave StorageNotInitializedError → `lib/storage.ts` reopens the store on every access.
+  A request that expired while the fingerprint prompt was open showed "no longer on this phone" → the approved
+  request now travels with the prepared proof and an expiry is reported as such (`ProofScreen.tsx`).
+  History now syncs on unlock, on foreground and every 20 s (`RootNavigator.tsx` `useHistorySync`).
+- **QR camera scanning does not work on Android:** VisionCamera 5's `useObjectOutput` is iOS-only (throws
+  "CameraObjectOutput is not available on Android!"). Android opens **Paste code** directly (`ScanScreen.tsx`
+  `CAN_SCAN_QR`). For a live QR scan on a phone add `react-native-vision-camera-barcode-scanner` + rebuild.
+- The approve prompt is fingerprint-only (Keystore key needs a biometric); PIN 1234 works only on the lock screen.
+
+**Phase 8 is complete when all of these are done:**
+
+1. ~~Build the APK and install it~~ Done on the emulator; full phone flow works (paste instead of QR scan).
+   For a physical phone build with
+   `-PreactNativeArchitectures=arm64-v8a` and set `src/config.ts` to the laptop's LAN IP.
+2. Reload the extension in `chrome://extensions` (new icons, bundled fonts, Copy code button).
+3. `npm run demo:reset`.
+4. Walk all 12 demo steps (DEMO_BUILD.md §1) with Chrome DevTools open: no console errors or hydration warnings,
+   SP dashboard row within 2 s, Expired watched live.
+5. Look at the landing page and the rebuilt End User screens (credentials, add credential, requests, devices,
+   password sign-in, register) in Chrome. None of them has been checked visually or signed in yet.
+6. Fix whatever the walkthrough finds, then commit.
 
 ## Demo story status (DEMO_BUILD.md §1)
 
-| # | Step | State |
-|---|------|-------|
-| 1 | Landing page | Exists (Phase 7/8 polish) |
-| 2 | SP portal: Shop A registers, key, `AGE_OVER_18` | Done (Phase 3) |
-| 3–4 | Phone wallet + add credential | **Phase 6.** Web stand-in works: `/dashboard/credentials` → Add → NADRA |
-| 5 | Extension pairing QR → "Paired" | **Done, verified live** |
-| 6 | Shop A detected by extension + desktop notification | **Done, verified live** |
-| 7–8 | Phone request + fingerprint + proof | **Phase 6.** Web stand-in works: `/dashboard/requests` → Approve / Decline |
-| 9 | Popup Verified + shop unlocks | **Done, verified live** (3 × VERIFIED) |
-| 10 | SP dashboard log, no personal data | Done (Phase 3) |
-| 11 | Negative cases | Decline **verified live**. Expired not yet watched live. Replay rejected (backend tests) |
-| 12 | History (phone + web) | Web `/dashboard/history` fixed (time-zone bug) and shows the entries. Phone = Phase 6 |
+| #   | Step                                                | State                                                                                                                                   |
+| --- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Landing page                                        | Rebuilt (Phase 8). Renders over HTTP, **not checked visually**                                                                          |
+| 2   | SP portal: Shop A registers, key, `AGE_OVER_18`     | Done (Phase 3)                                                                                                                          |
+| 3–4 | Phone wallet + add credential                       | **Phone app NOT tested (no APK built/run).** Web stand-in `/dashboard/credentials` → Add → NADRA rebuilt in Phase 8, not re-tested live |
+| 5   | Extension pairing QR → "Paired"                     | **Done, verified live**                                                                                                                 |
+| 6   | Shop A detected by extension + desktop notification | **Done, verified live**                                                                                                                 |
+| 7–8 | Phone request + fingerprint + proof                 | **Phone app NOT tested (no APK built/run).** Web stand-in `/dashboard/requests` rebuilt in Phase 8, not re-tested live                  |
+| 9   | Popup Verified + shop unlocks                       | **Done, verified live** (3 × VERIFIED)                                                                                                  |
+| 10  | SP dashboard log, no personal data                  | Done (Phase 3)                                                                                                                          |
+| 11  | Negative cases                                      | Decline **verified live**. Expired not yet watched live. Replay rejected (backend tests)                                                |
+| 12  | History (phone + web)                               | Web `/dashboard/history` works. Phone history **not tested** (no APK run). History was cleared by `demo:reset`                          |
+
+## Audit vs REQUIREMENTS.md (2026-11-25, /fyp-status)
+
+Checked: backend 111/111 tests pass (`services/backend/src/__tests__`), `tsc --noEmit` clean in backend, web,
+extension, mobile and sd-jwt. Nothing below was run on a phone.
+
+**Missing from the code (the docs list them):**
+
+| Item                           | Docs                                                                          | State                                                                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Account recovery               | FR-037, API-011 `/reverify` (all 4 issuers), API-028, API-029, BR-007, BR-024 | No route in the backend or any issuer                                                                                                                  |
+| Issuer revocation              | FR-017, API-041 `POST /revocations`, ALG-008                                  | Not built. Only the holder's own `POST /credentials/:id/revoke` exists                                                                                 |
+| Credential records             | API-014, API-015 (ALG-004), API-016 (FR-013)                                  | Not built. Credentials live under `GET/POST /credentials`                                                                                              |
+| Device challenge               | API-021 `POST /users/challenge`                                               | Not built (`users/login` exists)                                                                                                                       |
+| Device key revocation registry | BR-007, NFR-013                                                               | No model in `schema.prisma`; only credential revocation is checked                                                                                     |
+| ALG-005 expiry cron            | FR-024                                                                        | No timer. Sessions expire lazily when read (`expireIfDue`). Outcome is the same                                                                        |
+| SP rate limit                  | NFR-019                                                                       | None in the backend (listed as a known gap in Out of Scope)                                                                                            |
+| SP registration path           | API-042 `POST /verifiers`                                                     | Built as `POST /verifiers/register`                                                                                                                    |
+| Real push (FCM)                | FR-019, NFR-007                                                               | The phone polls `GET /verification/pending` (`RootNavigator.tsx`). Mobile `notification.service.ts` is excluded from tsc and Firebase is not installed |
+| sd-jwt tests                   | CLAUDE.md `npm test --workspace=packages/sd-jwt`                              | No test script and no tests in `packages/sd-jwt`                                                                                                       |
+
+**Empty, stub or unused files:**
+
+- `docs/SRS.md` is 0 bytes, though CLAUDE.md calls it the source of truth.
+- `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/SETUP.md` are stubs pointing at a `NEXUSID_PROJECT.md` that does not exist
+  (SETUP also names redis). NFR-022 wants every endpoint documented.
+- `services/backend/src/services/zkp.service.ts` is a mobile file in the backend, imported nowhere.
+- `services/backend/src/services/fraud-detection.service.ts` is imported nowhere, so `services/ml` is never called.
+- `services/backend/src/services/blockchain.service.ts` (Hyperledger Fabric) is not in the SRS. It is used fail-open by the credentials route.
+- `apps/mobile/src/services/notification.service.ts` is dead (see above).
+- `apps/web/tsc-output.txt` is a leftover. `@headlessui/react` is unused.
+- `apps/web/app/verifier/{analytics,create}/page.tsx` are deliberate redirects (fine).
+
+**Before the defense, in order:**
+
+1. Build and run the APK (steps 3–4, 7–8, 12). Without it the phone half of the demo is the web stand-in.
+2. Walk the 12 steps after `npm run demo:reset`, including Expired live.
+3. Start the NADRA/HEC/AU issuers by hand (`dev-start.sh` does not).
+4. Prepare viva answers for the missing FRs above (recovery, issuer revocation, invalidation): out of demo scope, with the design ready.
+5. Fill `docs/SRS.md` or remove the pointer to it, and fix the CLAUDE.md DB name (`nexusid_db`).
+6. Optional clean-up: delete or move the dead files above.
 
 ## How to run and test (from scratch)
 
@@ -45,6 +115,17 @@ checked visually), reload the extension, run the phone app end to end, then `npm
 
 ## Open items (carry forward)
 
+- **One device key per account (`users.public_key`).** Signing in on the phone registers the phone's key and replaces
+  the web stand-in's key, so after that the web `/dashboard/requests` approve path and web-issued credentials stop
+  verifying. Use the phone for steps 3–4, 7–8 and add the NADRA credential again on the phone.
+- **Pairing is per account, not per device** (`device_pairings.user_id`; `/verification/pending` filters by user).
+  The extension paired earlier via the console already routes to whichever device is signed in as that account.
+  To show step 5 live on the emulator: extension → **Copy code** → phone Scan (opens Paste code on Android) → Pair.
+- **Phone sign-out (or any 401) deletes the Keystore key and wipes the phone's credentials** (`auth.store.ts`
+  `logout`). Re-adding credentials is needed after every sign-out.
+- **Stray background issuers:** if `localhost:4001` answers but OTPs don't show in your terminal, an older background
+  issuer owns the port. `ss -ltnp | grep 400` → kill that node PID, then start the issuer in your own terminal.
+
 - **Watch the Expired state live:** reload Shop A, don't approve, wait 2 min → popup amber EXPIRED, shop "Try again".
 - **Web holder key is per browser, not per account** (`apps/web/lib/webKeypair.ts`, IndexedDB `signing-keypair`).
   Signing in as a different End User in the same Chrome profile → pairing/credentials fail
@@ -67,20 +148,25 @@ Suggested: commit Phase 4 and Phase 5 as two commits before starting Phase 6.
 
 ---
 
-# NexusID — Phase 8: polish, landing page, demo safety (2026-11-25)
+# NexusID — Phase 8: polish, landing page, demo safety (2026-11-25) — CODE COMPLETE, WALKTHROUGH PENDING
+
+> Not complete: the §1 demo-story walkthrough is not done, and the mobile app / APK has never been built, installed
+> or tested. See the checklist at the top of this file.
 
 ## 1. Landing page + logo
+
 - `apps/web/app/page.tsx` rewritten per DESIGN.md §6.1: nav · hero "Prove what matters. Hide what doesn't." with
   `components/landing/HeroCredential.tsx` (NADRA card whose values blur into ✓ predicates / "Never shared"; reduced
   motion → opacity only) · old way vs NexusID · 3 steps · 4 issuers (predicates from `packages/types`) · verifier
   CodeBlock · footer "Air University Islamabad · FYP 2026". Server component; only the hero and CodeBlock are client.
 - Logo mark (§10): `scripts/generate-logo.py` (stdlib only, no Pillow) writes `apps/web/app/{icon.svg,favicon.ico,
-  apple-icon.png}`, extension `icons/icon{16,32,48,128}.{png,svg}` (32 added to the manifest) and the Android
+apple-icon.png}`, extension `icons/icon{16,32,48,128}.{png,svg}` (32 added to the manifest) and the Android
   launcher `mipmap-*/ic_launcher{,_round}.png`. Re-run it after changing the mark.
 - Tab titles "Page · NexusID" everywhere: root template + small `layout.tsx` files with `metadata` next to the
   client pages. `app/verifier/layout.tsx` is now a server layout around `components/nexus/VerifierShell.tsx`.
 
 ## 2. Demo reset
+
 - `npm run demo:reset` (`services/backend/src/db/demo-reset.ts`), skill `/demo-reset`.
   Re-seeds issuers + Shop A, deletes every verification session of Shop A and of the demo user (default
   `admin@nexusid.com`, `-- --email x` for another), plus that user's portal QR sign-ins, then backfills 24 Shop A
@@ -90,25 +176,27 @@ Suggested: commit Phase 4 and Phase 5 as two commits before starting Phase 6.
 - Ran once on the dev DB: 24 test sessions cleared, 1 credential + 1 pairing kept, 24 rows backfilled.
 
 ## 3. Rough edges found and fixed
-| Where | Problem | Fix |
-|---|---|---|
-| `apps/web/components/AddCredentialModal.tsx` (whole file) | v1 design: emoji icons, inline hex, gradient buttons, headlessui; success step printed raw attribute values; "Successfully verified" (§8) | Rebuilt on shadcn Dialog + lucide; success shows `CredentialCard` with predicates only; same API calls and masks. A failed local save now shows an error instead of a false success |
-| `apps/web/app/dashboard/credentials/page.tsx` | v1 cards with emoji, "Active" status, raw field names, second h1 under the top bar, gradient button, no Retry | Shared `CredentialCard` (Valid/Expired/Revoked), skeletons, `EmptyState`, `ErrorState` with Retry |
-| `apps/web/app/dashboard/requests/page.tsx` | Showed raw disclosure values ("Age Over 18: true"), minutes countdown, no "Never shared", decline without confirm, "Loading…" text | Web ConsentSheet (§5.2): WILL BE CONFIRMED label + mono code, NEVER SHARED list, m:ss countdown (warning < 30 s, danger < 10 s, announced at 30/10 s), Decline → AlertDialog, expired state, toasts |
-| `apps/web/app/dashboard/devices/page.tsx` | v1 styles, duplicated the dashboard list without browser names or revoke confirm; told users to use a "Copy code instead" button the extension didn't have | Shared `components/nexus/PairedDevices.tsx` (also used by SCR-014) + shadcn paste form |
-| `apps/web/app/auth/login/password/page.tsx`, `auth/register/page.tsx` | Old hexagon logo with gradient, inline hex, `#3B6FE8` small link text, generic errors | `AuthFrame` like the provider pages; specific server-unreachable message |
-| `apps/web/app/pair/page.tsx` | v1 hex styles, `#3B6FE8` small text | Tokens, Card, spinner |
-| `auth/login/page.tsx:259`, `dashboard/pair/page.tsx:225`, `dashboard/history/page.tsx:319,375`, `PairedDevices` | `text-faint` on meaningful text (§9 contrast) | `text-muted` |
-| `apps/extension/src/popup/popup.ts` QR view | No way to pair without the phone except DevTools | "Copy code" button next to "New code" |
-| `apps/extension/popup.html` | Fonts from Google Fonts at runtime (flash on a weak hotspot, §10) | Bundled the app's TTFs in `apps/extension/fonts`, `@font-face` in popup.css |
-| `apps/mobile/src/components/ConsentSheet.tsx` | Countdown not announced (§9) | `announceForAccessibility` at 30 s, 10 s and on expiry |
-| `apps/mobile/src/screens/RequestScreen.tsx:71` | Error button said "Retry" but went back | "Back to wallet" (`ErrorState` got `actionLabel`) |
-| `apps/web/components/QRGenerator.tsx`, `AnalyticsCharts.tsx`, `lib/constants.ts` | Dead v1 code | Deleted |
+
+| Where                                                                                                           | Problem                                                                                                                                                    | Fix                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/components/AddCredentialModal.tsx` (whole file)                                                       | v1 design: emoji icons, inline hex, gradient buttons, headlessui; success step printed raw attribute values; "Successfully verified" (§8)                  | Rebuilt on shadcn Dialog + lucide; success shows `CredentialCard` with predicates only; same API calls and masks. A failed local save now shows an error instead of a false success                 |
+| `apps/web/app/dashboard/credentials/page.tsx`                                                                   | v1 cards with emoji, "Active" status, raw field names, second h1 under the top bar, gradient button, no Retry                                              | Shared `CredentialCard` (Valid/Expired/Revoked), skeletons, `EmptyState`, `ErrorState` with Retry                                                                                                   |
+| `apps/web/app/dashboard/requests/page.tsx`                                                                      | Showed raw disclosure values ("Age Over 18: true"), minutes countdown, no "Never shared", decline without confirm, "Loading…" text                         | Web ConsentSheet (§5.2): WILL BE CONFIRMED label + mono code, NEVER SHARED list, m:ss countdown (warning < 30 s, danger < 10 s, announced at 30/10 s), Decline → AlertDialog, expired state, toasts |
+| `apps/web/app/dashboard/devices/page.tsx`                                                                       | v1 styles, duplicated the dashboard list without browser names or revoke confirm; told users to use a "Copy code instead" button the extension didn't have | Shared `components/nexus/PairedDevices.tsx` (also used by SCR-014) + shadcn paste form                                                                                                              |
+| `apps/web/app/auth/login/password/page.tsx`, `auth/register/page.tsx`                                           | Old hexagon logo with gradient, inline hex, `#3B6FE8` small link text, generic errors                                                                      | `AuthFrame` like the provider pages; specific server-unreachable message                                                                                                                            |
+| `apps/web/app/pair/page.tsx`                                                                                    | v1 hex styles, `#3B6FE8` small text                                                                                                                        | Tokens, Card, spinner                                                                                                                                                                               |
+| `auth/login/page.tsx:259`, `dashboard/pair/page.tsx:225`, `dashboard/history/page.tsx:319,375`, `PairedDevices` | `text-faint` on meaningful text (§9 contrast)                                                                                                              | `text-muted`                                                                                                                                                                                        |
+| `apps/extension/src/popup/popup.ts` QR view                                                                     | No way to pair without the phone except DevTools                                                                                                           | "Copy code" button next to "New code"                                                                                                                                                               |
+| `apps/extension/popup.html`                                                                                     | Fonts from Google Fonts at runtime (flash on a weak hotspot, §10)                                                                                          | Bundled the app's TTFs in `apps/extension/fonts`, `@font-face` in popup.css                                                                                                                         |
+| `apps/mobile/src/components/ConsentSheet.tsx`                                                                   | Countdown not announced (§9)                                                                                                                               | `announceForAccessibility` at 30 s, 10 s and on expiry                                                                                                                                              |
+| `apps/mobile/src/screens/RequestScreen.tsx:71`                                                                  | Error button said "Retry" but went back                                                                                                                    | "Back to wallet" (`ErrorState` got `actionLabel`)                                                                                                                                                   |
+| `apps/web/components/QRGenerator.tsx`, `AnalyticsCharts.tsx`, `lib/constants.ts`                                | Dead v1 code                                                                                                                                               | Deleted                                                                                                                                                                                             |
 
 Checked and already fine: SP dashboard/requirements/API keys, history, QR sign-in, Shop A (copy, banner, states),
 popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-button labels on all three surfaces.
 
 ## Checks
+
 - `npx tsc --noEmit`: web, extension, mobile, backend all pass. `next build` passes (lint + types).
 - Rendered over HTTP: landing, auth pages, SP pages signed in as Shop A, titles, favicons. End User pages not
   rendered signed in (no password for the demo account here), and nothing checked visually (no headless browser).
@@ -117,6 +205,11 @@ popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-butt
   `NEXT_DIST_DIR=.next-build npx next build` while the dev server runs.
 
 ## Not done
+
+- **Mobile app / APK:** tested on the emulator only (2026-11-25, see top). Not yet run on a physical phone.
+- **§1 demo-story walkthrough (Phase 8 item 3): not done.** The rough-edge list above comes from reading code and
+  HTTP checks, not from a live run.
+- Extension changes built but not reloaded or tried in Chrome.
 - `@headlessui/react` is now unused in `apps/web/package.json`; left installed (no dependency changes before the demo).
 - Extension icon / phone launcher need a reload / reinstall to show the new mark.
 
@@ -125,6 +218,7 @@ popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-butt
 # NexusID — Phase 7: End User web portal (2026-11-25)
 
 ## FR-036 QR sign-in (was not implemented in the backend before)
+
 - API-023 now accepts `purpose: "SIGN_IN"` → `{ challengeId, code, pollToken, expiresAt, qrPayload }`.
   QR payload = `<PAIRING_WEB_URL>/pair#p=..&c=..&t=SIGN_IN` (PAIRING links unchanged, no `t`).
 - New table `portal_sign_ins` (migration `portal_sign_in`): pending → approved (API-025) → consumed (API-024).
@@ -141,6 +235,7 @@ popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-butt
   → backend **111/111**. Live end-to-end script through the web route also passed.
 
 ## Screens (apps/web)
+
 - **SCR-013 `/auth/login`** — QR sign-in, WhatsApp Web style: `QRPanel` left (120 s ring), 3 steps right.
   Auto-refreshes a new code at 0:00, up to 5 times in a row (10 min idle), then "Code expired · New code".
   Polls every 2 s; "Signed in ✓" then full navigation to `/dashboard` (or `?next=`). Another tab starting a code → message.
@@ -158,9 +253,11 @@ popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-butt
   Verification proxy now forwards DELETE.
 
 ## Mobile
+
 - Scanner reads `t=SIGN_IN`, signs with that purpose (prompt "Sign in on your computer"), shows "Signed in".
 
 ## How to test QR sign-in without the phone
+
 1. Signed-in Chrome profile A (End User). Profile B / incognito: open `localhost:3000/auth/login`.
 2. In B's DevTools console: `document.querySelector('[aria-label="NexusID sign-in QR code"]')` is the code; easier:
    the QR encodes `localhost:3000/pair#p=…&c=…&t=SIGN_IN` — scan it with a phone camera, or copy it from the
@@ -168,6 +265,7 @@ popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-butt
    (Profile A must hold the device key registered for that account — see the per-browser key note above.)
 
 ## Not verified
+
 - No headless browser on this machine: the screens were checked by SSR render + typecheck only, not visually.
 - Phone scan of a SIGN_IN code (needs the Phase 6 device run).
 
@@ -179,6 +277,7 @@ popup states and focus ring, mobile copy (§8), touch targets (44 px), icon-butt
 Now a real app on **React Native 0.88.1** (new arch, Hermes), DESIGN.md §3/§5/§6.2.
 
 ## Setup changes
+
 - **Not in the root npm workspace any more** (root `package.json` lists `apps/web`, `apps/extension`,
   `apps/demo-shop` explicitly). RN needs React 19, web is on React 18. Install with
   `cd apps/mobile && nvm use && npm install --no-workspaces`. Needs **Node 22** (`.nvmrc`).
@@ -189,6 +288,7 @@ Now a real app on **React Native 0.88.1** (new arch, Hermes), DESIGN.md §3/§5/
 - Manifest: CAMERA, USE_BIOMETRIC. App label "NexusID".
 
 ## Screens (src/screens)
+
 SignIn (+ "Securing your device…" while the Keystore key is made, FR-002) · Lock (FR-015, auto biometric prompt,
 re-locks after 30 s in background) · Wallet SCR-002 (Apple Wallet stack, empty state with 4 category tiles,
 pending-request banner) · CredentialDetail SCR-003 (Confirms list label + mono code, details, Update/Delete with
@@ -201,6 +301,7 @@ History SCR-010 (grouped by day, outcome badges, long-press delete, Clear all) �
 Bottom tabs Wallet · History · Profile + centred floating Scan button.
 
 ## Crypto / storage changes (approved by Safi 2026-11-25)
+
 - **On-device holder ported:** `apps/mobile/src/crypto/holder.ts` mirrors `packages/sd-jwt/src/holder.ts` (like
   `apps/web/lib/webHolder.ts`) with pure-JS SHA-256 (`@noble/hashes`) and its own base64url/UTF-8, because Hermes has
   no Node `crypto`, no `crypto.subtle`. Signer = Android Keystore (`keystore.service.ts` → `createSignature`).
@@ -220,12 +321,14 @@ Bottom tabs Wallet · History · Profile + centred floating Scan button.
 - `KeystoreService.getInstance()` added; `signData()` takes a prompt title ("Approve request from Shop A").
 
 ## Backend: history delete (API-039/040, FR-030, BR-023)
+
 - Migration `history_user_delete`: `verification_requests.user_deleted_at` (soft delete).
 - `DELETE /api/v1/verification/history/:id` and `DELETE /api/v1/verification/history` (device JWT). Hidden from API-038
   (phone + web), **SP log and audit log keep the row** (BR-023). 404 for pending / not yours / already deleted.
 - Tests: 5 new in `verification-loop.test.ts`; backend suite **105/105 pass**.
 
 ## Important for the demo
+
 - **Credentials are bound to the device key (cnf).** Signing in on the phone registers the phone's key
   (`PUT /users/me/public-key`) and replaces the web stand-in key for that account. Add credentials **on the phone,
   after signing in there**. Old web-issued credentials won't verify from the phone (and vice versa).
@@ -240,8 +343,9 @@ Bottom tabs Wallet · History · Profile + centred floating Scan button.
 SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2 OutcomeBadge, §5.6 PredicateChip).
 
 ## Extension (`apps/extension`)
+
 - **Now a TypeScript workspace** (`@nexusid/extension`) bundled by esbuild (`build.mjs`, `npm run build|watch|typecheck
-  -w apps/extension` → `dist/`, git-ignored). `@types/chrome` 0.3.7. `manifest.json` (v1.1.0) points at
+-w apps/extension` → `dist/`, git-ignored). `@types/chrome` 0.3.7. `manifest.json` (v1.1.0) points at
   `dist/background.js`; `popup.html` loads `qrcode.vendor.js` + `dist/popup.js`; styles in `popup.css` (CSS variables
   from DESIGN §3, not Tailwind). Old `background.js`, `popup.js`, `config.js` deleted.
 - Files: `src/background/index.ts` (worker), `src/popup/popup.ts` (views), `src/shared/{config,state,icons}.ts`
@@ -260,6 +364,7 @@ SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2
 - Permissions: storage, notifications, alarms, activeTab, scripting.
 
 ## Backend
+
 - API-024 `GET /qr-challenges/:id` (and redeem) now also return `active` and `deviceName` (from `users.device_info.model`).
 - New `DELETE /api/v1/pairings/self` (header `x-pairing-token`): extension revokes its own pairing on Unpair
   (idempotent, audited `device_pairing_revoked` with `by: extension`).
@@ -268,6 +373,7 @@ SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2
 - Backend tests 100/100 pass (re-run 2026-11-25 after all changes). Extension typecheck clean.
 
 ## Web fixes found during the live check
+
 - `components/AddCredentialModal.tsx` `apiFetch` returned the `{ success, data }` envelope, so NADRA verify-otp got
   `session_id: undefined` (Zod "expected string, received undefined") and **every issuer's credential (NADRA, HEC,
   AU, LinkedIn) was dropped before reaching the browser wallet**. Now unwraps `data`. Any credential added before this
@@ -278,6 +384,7 @@ SCR-011 rebuilt to DESIGN.md §6.3 (360 × 560, §3 tokens, §5.4 QRPanel, §3.2
   PKT 00:00–05:00 the day's entries were filtered out and every total showed 0. Now uses local dates on both ends.
 
 ## Verified live in Chrome (2026-11-25)
+
 - Pairing via `/pair` link → popup "Paired ✓" → Ready. Unpair revoked server-side (pairing row `revoked`).
 - 3 Shop A sessions relayed → approved on `/dashboard/requests` → VERIFIED (popup, notification, shop unlock).
 - 2 Shop A sessions declined → DECLINED.
@@ -323,6 +430,7 @@ in headless Chrome against `next dev` + live backend, as Shop A and as a throwaw
 the known `/favicon.ico` 404.
 
 ## Backend
+
 - **API-043** `GET /verifiers/api-key` (prefix + rotation time, never the key) and **API-044**
   `POST /verifiers/api-key/regenerate` (ALG-009) at the SRS paths. `POST /verifiers/me/api-key` kept as an alias.
 - **API-047/048** (`/analytics/verifications`, `/analytics/recent`) now accept the portal JWT **or** `x-api-key`
@@ -333,6 +441,7 @@ the known `/favicon.ico` 404.
     No user fields (FR-042 AC2, tested by exact key list).
 
 ## Web
+
 - **SCR-012** `/login`: two role cards → `/auth/login` (End User, unchanged until Phase 7) or `/auth/provider-login`.
 - **SCR-017** `/auth/provider-login` + `/auth/provider-register` (login-03 `AuthFrame`). Register: platform name, domain,
   email, password. Inline field errors, a taken email/domain shown on the field (FR-039 AC2), first key shown once, then → Requirements.
@@ -353,11 +462,13 @@ the known `/favicon.ico` 404.
   Middleware open redirect on `?next=//host` for already-signed-in users.
 
 ## Dev DB side effects of the check
+
 - One extra Shop A session (AGE_OVER_18, now EXPIRED) in Shop A's log.
 - One provider "UI Test Provider" (`ui-test-…@example.com`) with a rotated key and requirements AGE_OVER_21 + ENROLLED_CURRENT.
 - Shop A's key (`nxk_shop_a_demo_key_2026`) and requirements were **not** changed.
 
 ## Not done / later
+
 - One key per provider (schema has a single `api_key`), so no key names or "last used".
 - Seeded 7-day history for the chart (DESIGN §10) → Phase 8.
 
@@ -400,7 +511,7 @@ errors or hydration warnings (headless Chrome against `next dev`; only a missing
   separator skeleton tooltip sonner **sidebar** (worked on 2.3.0) chart form progress scroll-area, plus `hooks/use-mobile.tsx`.
 - `globals.css`: DESIGN.md §4.2 dark mapping on `:root` only (no `.dark`, no light theme). Sidebar vars derived from the same tokens.
 - `tailwind.config.ts`: shadcn tokens + §3.1 colours (`surface overlay inset text.{muted,faint} accent.{primary,hover,text}
-  success warning danger cat.*`). Legacy v1 colours (`bg.*`, `border.{subtle,default,strong}`, `text.{primary,secondary,tertiary}`,
+success warning danger cat.*`). Legacy v1 colours (`bg.*`, `border.{subtle,default,strong}`, `text.{primary,secondary,tertiary}`,
   `cred.*`, `accent.secondary`) kept because existing pages use them.
 - Fonts: next/font (already in layout.tsx) now wired via `--font-inter / --font-dm-sans / --font-jetbrains`; CSS `@import` removed.
 - Removed the custom v1 `fontSize` scale (xs 10.2 px, sm 12.8 px) and the `rounded-xl: 16px` override so shadcn components get the
@@ -438,9 +549,9 @@ against `nexusid_db_test`. Typecheck clean: backend, sd-jwt, types, web.
 - **API-036** decline → DECLINED; **API-037** `POST /verification/fail/:id`
   (new) → FAILED with no proof hash or issuer.
 - **ALG-005:** `verificationService.expireSessions()` (atomic `UPDATE …
-  RETURNING`) runs every 5 s from `bootstrap()`; lazy expiry kept as backup.
+RETURNING`) runs every 5 s from `bootstrap()`; lazy expiry kept as backup.
 - **Outcomes (API-031/033, history, SP log):** `{ status, outcome, predicate,
-  predicateLabel, issuer?, decidedAt? }`; `outcome` ∈ PENDING / VERIFIED /
+predicateLabel, issuer?, decidedAt? }`; `outcome` ∈ PENDING / VERIFIED /
   FAILED / DECLINED / EXPIRED. **No claim values anywhere.**
 - **BR-015:** migration `20261124180000_predicate_outcomes` drops
   `verification_results.verified_fields` (claim values already stored in the
@@ -461,12 +572,12 @@ another issuer (BR-021). Always-visible claims are just `credential_type` and
 `issuer_name`. Name, CNIC, DOB, address, degree title, CGPA, employer and email
 never enter a credential.
 
-| Issuer | Predicates | Derived from |
-|---|---|---|
-| NADRA | AGE_OVER_18, AGE_OVER_21, NATIONALITY_PAKISTANI | DOB; verified CNIC record |
-| HEC | DEGREE_BACHELOR_OR_HIGHER | `isBachelorOrHigher(degree_title)` |
-| Air University | ENROLLED_CURRENT, CGPA_AT_LEAST_2_0/3_0/3_5 | enrollment status, CGPA |
-| LinkedIn | EMPLOYMENT_ACTIVE | current position |
+| Issuer         | Predicates                                      | Derived from                       |
+| -------------- | ----------------------------------------------- | ---------------------------------- |
+| NADRA          | AGE_OVER_18, AGE_OVER_21, NATIONALITY_PAKISTANI | DOB; verified CNIC record          |
+| HEC            | DEGREE_BACHELOR_OR_HIGHER                       | `isBachelorOrHigher(degree_title)` |
+| Air University | ENROLLED_CURRENT, CGPA_AT_LEAST_2_0/3_0/3_5     | enrollment status, CGPA            |
+| LinkedIn       | EMPLOYMENT_ACTIVE                               | current position                   |
 
 **Doc conflict resolved:** `.claude/rules/sd-jwt.md` gives CGPA to HEC, but
 FR-005 AC1 lists CGPA under enrollment and only the AU record has a CGPA, so

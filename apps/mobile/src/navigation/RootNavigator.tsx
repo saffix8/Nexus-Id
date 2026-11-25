@@ -7,6 +7,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { apiService, apiEvents } from '../services/api.service';
 import { useAuthStore } from '../store/auth.store';
 import { useSessionStore } from '../store/session.store';
+import { useHistoryStore } from '../store/history.store';
 import { colors, timing } from '../styles/tokens';
 import { navigationRef } from './navigationRef';
 import { ScanFab, TabBar } from './TabBar';
@@ -31,7 +32,13 @@ const RELOCK_AFTER_MS = 30_000;
 function Tabs() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Tab.Navigator tabBar={props => <TabBar {...props} />} screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.bg } }}>
+      <Tab.Navigator
+        tabBar={props => <TabBar {...props} />}
+        screenOptions={{
+          headerShown: false,
+          sceneStyle: { backgroundColor: colors.bg },
+        }}
+      >
         <Tab.Screen name="Wallet" component={WalletScreen} />
         <Tab.Screen name="History" component={HistoryScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
@@ -54,8 +61,14 @@ function usePendingPoller(enabled: boolean) {
         if (cancelled) return;
         const session = useSessionStore.getState();
         session.setPending(rows);
-        const fresh = rows.find(r => !session.seen.has(r.requestId) && Date.parse(r.expiresAt) > Date.now());
-        const current = navigationRef.isReady() ? navigationRef.getCurrentRoute()?.name : undefined;
+        const fresh = rows.find(
+          r =>
+            !session.seen.has(r.requestId) &&
+            Date.parse(r.expiresAt) > Date.now(),
+        );
+        const current = navigationRef.isReady()
+          ? navigationRef.getCurrentRoute()?.name
+          : undefined;
         if (fresh && current !== 'Request' && current !== 'Proof') {
           session.markSeen(fresh.requestId);
           navigationRef.navigate('Request', { requestId: fresh.requestId });
@@ -79,6 +92,32 @@ function usePendingPoller(enabled: boolean) {
   }, [enabled]);
 }
 
+/**
+ * FR-028: the phone and the web portal show the same history (API-038). Load it as soon as
+ * the wallet is unlocked after sign-in, when the app comes back to the foreground, and every
+ * HISTORY_SYNC_MS while open, so entries decided on the web portal appear without a manual refresh.
+ */
+const HISTORY_SYNC_MS = 20_000;
+
+function useHistorySync(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const sync = () => {
+      if (AppState.currentState === 'active')
+        void useHistoryStore.getState().load();
+    };
+    sync();
+    const t = setInterval(sync, HISTORY_SYNC_MS);
+    const sub = AppState.addEventListener('change', st => {
+      if (st === 'active') sync();
+    });
+    return () => {
+      clearInterval(t);
+      sub.remove();
+    };
+  }, [enabled]);
+}
+
 function useAutoLock(enabled: boolean) {
   const backgroundedAt = useRef<number | null>(null);
   useEffect(() => {
@@ -86,7 +125,8 @@ function useAutoLock(enabled: boolean) {
     const sub = AppState.addEventListener('change', st => {
       if (st === 'background') backgroundedAt.current = Date.now();
       else if (st === 'active' && backgroundedAt.current) {
-        if (Date.now() - backgroundedAt.current > RELOCK_AFTER_MS) useSessionStore.getState().setUnlocked(false);
+        if (Date.now() - backgroundedAt.current > RELOCK_AFTER_MS)
+          useSessionStore.getState().setUnlocked(false);
         backgroundedAt.current = null;
       }
     });
@@ -108,26 +148,61 @@ export function RootNavigator() {
   }, []);
 
   usePendingPoller(signedIn && unlocked);
+  useHistorySync(signedIn && unlocked);
   useAutoLock(signedIn && unlocked);
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg }, animation: 'slide_from_right' }}>
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.bg },
+        animation: 'slide_from_right',
+      }}
+    >
       {!signedIn ? (
-        <Stack.Screen name="SignIn" component={SignInScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen
+          name="SignIn"
+          component={SignInScreen}
+          options={{ animation: 'fade' }}
+        />
       ) : !unlocked ? (
-        <Stack.Screen name="Lock" component={LockScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen
+          name="Lock"
+          component={LockScreen}
+          options={{ animation: 'fade' }}
+        />
       ) : (
         <>
-          <Stack.Screen name="Tabs" component={Tabs} options={{ animation: 'fade' }} />
-          <Stack.Screen name="CredentialDetail" component={CredentialDetailScreen} />
+          <Stack.Screen
+            name="Tabs"
+            component={Tabs}
+            options={{ animation: 'fade' }}
+          />
+          <Stack.Screen
+            name="CredentialDetail"
+            component={CredentialDetailScreen}
+          />
           <Stack.Screen name="AddCredential" component={AddCredentialScreen} />
-          <Stack.Screen name="Scan" component={ScanScreen} options={{ animation: 'fade_from_bottom' }} />
+          <Stack.Screen
+            name="Scan"
+            component={ScanScreen}
+            options={{ animation: 'fade_from_bottom' }}
+          />
           <Stack.Screen
             name="Request"
             component={RequestScreen}
-            options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' }, gestureEnabled: false }}
+            options={{
+              presentation: 'transparentModal',
+              animation: 'fade',
+              contentStyle: { backgroundColor: 'transparent' },
+              gestureEnabled: false,
+            }}
           />
-          <Stack.Screen name="Proof" component={ProofScreen} options={{ animation: 'fade', gestureEnabled: false }} />
+          <Stack.Screen
+            name="Proof"
+            component={ProofScreen}
+            options={{ animation: 'fade', gestureEnabled: false }}
+          />
         </>
       )}
     </Stack.Navigator>

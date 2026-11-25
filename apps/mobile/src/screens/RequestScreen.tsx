@@ -94,7 +94,7 @@ export function RequestScreen({ route, navigation }: Props) {
       // the fingerprint prompt — the in-app auth before approving (FR-015 → FR-021).
       checkRequest(request, credential, revoked);
       const proof = await buildProof(request, credential, userId);
-      useSessionStore.getState().setPrepared({ requestId: request.requestId, credentialId: credential.id, proof });
+      useSessionStore.getState().setPrepared({ requestId: request.requestId, credentialId: credential.id, proof, request });
       navigation.replace('Proof', { requestId: request.requestId, credentialId: credential.id });
     } catch (err) {
       setApproving(false);
